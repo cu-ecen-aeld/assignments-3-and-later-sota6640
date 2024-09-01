@@ -3,6 +3,7 @@
 # Author: Sonal Tamrakar
 # Date: 08/31/2024
 
+# error checking
 if [ $# -ne 2 ] || [ -d "$2" ]
 then
     echo "ERROR: Invalid Number of Arguments."
@@ -18,12 +19,18 @@ WRITESTR=$2
 
 WRITEFILEDIR="$(dirname $WRITEFILE)"
 
+# if directory doesn't exist, create it
 if [ ! -d "$WRITEFILEDIR" ]
 then
    mkdir -p "$WRITEFILEDIR"
 fi
 
-if [ ! -f "$WRITEFILE" ]
+echo "$WRITESTR" > "$WRITEFILE"
+
+if [ $? -eq 1 ]
 then
-   echo "$WRITESTR" > "$WRITEFILE"
+   echo The file could not be created.
+   exit 1
+else
+   exit 0
 fi
