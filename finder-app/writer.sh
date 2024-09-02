@@ -6,11 +6,10 @@
 # error checking
 if [ $# -ne 2 ] || [ -d "$2" ]
 then
-    echo "ERROR: Invalid Number of Arguments."
-    echo "Total number of arguments should be 2."
-    echo "The order of the arguments should be:"
+    echo "ERROR: Arguments != 2 and/or"
+    echo "Expected order of the arguments should be:"
     echo "1) File Directory Path Including Filename."
-    echo "2) String to be written in the specified directory file."
+    echo "2) String WRITESTR to be written in the specified directory file."
     exit 1
 fi
 
@@ -24,7 +23,7 @@ if [ ! -d "$WRITEFILEDIR" ]
 then
    mkdir -p "$WRITEFILEDIR"
 fi
-
+# write to file. if file doesn't exist, makes the file and then writes to it
 echo "$WRITESTR" > "$WRITEFILE"
 
 if [ $? -eq 1 ]

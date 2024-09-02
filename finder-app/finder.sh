@@ -7,12 +7,12 @@
 # make sure there are only two arguments passed
 if [ $# -ne 2 ] || [ ! -d "$1" ] || [ -d "$2" ]
 then
-    echo "ERROR: Invalid Number of Arguments."
-    echo "ERROR: Directory could not be found."
-    echo "Total number of arguments should be 2."
-    echo "The order of the arguments should be:"
-    echo "1) File Directory Path."
-    echo "2) String to be searched in the specified directory path."
+    echo "ERROR: Arguments != 2 and/or"
+    echo "ERROR: Directory could not be found and/or"
+    echo "ERROR: 2nd argument is a directory, and not a string."
+    echo "Expected order of the arguments should be:"
+    echo "1) Directory Path FILESDIR to search for SEARCHSTR"
+    echo "2) string SEARCHSTR"
     exit 1
 fi
 
