@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assignment 1 finder-app writer.sh 
+# Assignment 1/2 finder-app writer.sh 
 # Author: Sonal Tamrakar
 # Date: 08/31/2024
 
