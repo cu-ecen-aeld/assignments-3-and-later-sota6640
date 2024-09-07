@@ -17,10 +17,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <syslog.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 
 
 int main(int argc, char *argv[])
@@ -29,6 +31,7 @@ int main(int argc, char *argv[])
     // No arguments were provided. 
     if(argc < 3) {
         syslog(LOG_ERR, "Failed to open file, arguments should be three");
+        exit(1);
     }
 
     // Arguments given weren't 3. 
@@ -37,6 +40,7 @@ int main(int argc, char *argv[])
         syslog(LOG_INFO, "1) Name of the program being executed.");
         syslog(LOG_INFO, "2) File Directory Path Including Filename.");
         syslog(LOG_INFO, "3) String WRITESTR to be written in the specified directory file.");
+        exit(1);
     }
 
     const char *writefile = argv[1];
@@ -51,16 +55,23 @@ int main(int argc, char *argv[])
         /*error*/
         int err = errno;
         syslog(LOG_ERR, "%s failed to open. errno -> %d", writefile, err);
+        exit(1);
     }
 
-    syslog(LOG_DEBUG, "Writing %s to %s", writestr, writefile);
-    
     nr = write(fd, writestr, strlen(writestr));
-    if (nr == -1)
+
+
+    if (nr != strlen(writestr))
     {
         /*error*/
         int err1 = errno;
         syslog(LOG_ERR, "Failed to write %s to %s. errno -> %d", writestr, writefile, err1);
+        exit(1);
+    }
+
+    else if (nr == strlen(writestr))
+    {
+        syslog(LOG_DEBUG, "Writing %s to %s", writestr, writefile);
     }
 
     close(fd);
