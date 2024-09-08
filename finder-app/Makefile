@@ -1,3 +1,10 @@
+# ECEN 5713 Assignment 1/2 Makefile
+# Builds the writer application with support for cross-compilation using CROSS-COMPILE
+# Author: Sonal Tamrakar
+# Credit: Adapted from Sam Siewert POSIX API Makefile 
+# https://math.uaa.alaska.edu/~ssiewert/a335_code/EXAMPLES/POSIX/
+# Date: 09/08/2024
+
 INCLUDE_FLAGS= -Wall -Werror 
 LIB_DIRS = 
 

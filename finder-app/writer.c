@@ -12,6 +12,7 @@
  * @brief	Assignment 1/2. C implementation of writer.sh from Assignment 1
  * @author  Sonal Tamrakar
  * @date    09-08-2024
+ * @credit  Chapter 2: File I/O Linux System Programming, Robert Love
  */
 
 #include <sys/types.h>
@@ -27,14 +28,15 @@
 
 int main(int argc, char *argv[])
 {
+    // Setting up syslog logging using LOG_USER facility
     openlog("writerClogging", LOG_CONS | LOG_PID , LOG_USER);
-    // No arguments were provided. 
+    // No arguments were provided or partial arguments
     if(argc < 3) {
         syslog(LOG_ERR, "Failed to open file, arguments should be three");
         exit(1);
     }
 
-    // Arguments given weren't 3. 
+    // Arguments given weren't 3. Show debug information
     if(argc != 3) {
         syslog(LOG_ERR, "Arguments inconsistent. Expected order of the arguments should be:");
         syslog(LOG_INFO, "1) Name of the program being executed.");
@@ -48,6 +50,13 @@ int main(int argc, char *argv[])
     int fd;
     ssize_t nr;
 
+    /*
+    O_WRONLY: only for writing
+    O_CREAT: kernel creates file if it doesn't exist
+    O_TRUNC: overwrites everything in the file, makes it zero length
+    Permissions: owner + group has read/write permissions, everyone
+    else can just read
+    */
     fd = open(writefile, O_WRONLY | O_CREAT | O_TRUNC,
             S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
     if (fd == -1) 
@@ -68,7 +77,8 @@ int main(int argc, char *argv[])
         syslog(LOG_ERR, "Failed to write %s to %s. errno -> %d", writestr, writefile, err1);
         exit(1);
     }
-
+    
+    //exact match
     else if (nr == strlen(writestr))
     {
         syslog(LOG_DEBUG, "Writing %s to %s", writestr, writefile);
