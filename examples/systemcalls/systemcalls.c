@@ -8,6 +8,17 @@
 #include <fcntl.h>
 #include <errno.h>
 /**
+ * @file    systemcalls.c
+ * @brief	Assignment 3. exec() + system() function implementations
+ * @editor  Sonal Tamrakar
+ * @date    09-09-2024
+ * @credit  Chapter 5: Process Management Linux System Programming, Robert Love
+ * @credit2 https://stackoverflow.com/questions/13784269/redirection-inside-call-to-execvp-not-working/13784315#13784315
+ */
+
+
+
+/**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
  *   successfully using the system() call, false if an error occurred,
@@ -78,6 +89,7 @@ bool do_exec(int count, ...)
         if (execv_stat == -1)
         {
             perror("execv");
+            printf("execv fail do_exec()\n");
             exit(EXIT_FAILURE);
         }
     }
@@ -155,6 +167,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         if (execv_stat == -1)
         {
             perror("execv");
+            printf("execv fail do_exect_redirect()\n");
             exit(EXIT_FAILURE);
         }
     }
