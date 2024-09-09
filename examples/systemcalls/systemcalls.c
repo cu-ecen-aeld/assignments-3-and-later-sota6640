@@ -1,5 +1,12 @@
 #include "systemcalls.h"
-
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <errno.h>
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -9,13 +16,18 @@
 */
 bool do_system(const char *cmd)
 {
+    int ret;
+    if (cmd == NULL)
+    {
+        ret = system(cmd);
+        if(!ret) return false; //no shell is available
+        //shell is available
+    }
+    
+    ret = system(cmd);
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    //a child process couldn't be created or status couldn't be received
+    if (ret != 0) return false;
 
     return true;
 }
@@ -36,6 +48,8 @@ bool do_system(const char *cmd)
 
 bool do_exec(int count, ...)
 {
+    pid_t pid;
+    int status;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -49,18 +63,45 @@ bool do_exec(int count, ...)
     // and may be removed
     command[count] = command[count];
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    pid = fork();
+    if (pid == -1)
+    {
+        perror("fork");
+        return false;
+    }
+
+    /* the child ... */
+    if (!pid)
+    {
+        int execv_stat;
+        execv_stat = execv(command[0], command);
+        if (execv_stat == -1)
+        {
+            perror("execv");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (pid > 0)
+    {
+        pid_t stat;
+        stat = waitpid(pid, &status,0); //WNOHANG OR 0?
+        if (stat == -1) 
+        {
+            perror("waitpid");
+            return false;
+        }
+        
+        //Normal termination
+        if(WIFEXITED(status) != 0)
+        {
+            if(WEXITSTATUS(status) != 0) return false;
+        }
+        else return false;
+
+    }
 
     va_end(args);
-
     return true;
 }
 
@@ -71,6 +112,7 @@ bool do_exec(int count, ...)
 */
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
+    pid_t pid;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -84,14 +126,64 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
+    int fd = open(outputfile, O_WRONLY | O_TRUNC | O_CREAT, 
+                S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+                    
+    if (fd == -1) 
+    {
+        /*error opening file*/
+        perror("open");
+        return false;
+    }
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
+    pid = fork();
+    if (pid == -1)
+    {
+        perror("fork");
+        return false;
+    }
+
+    else if (pid == 0)
+    {
+        if (dup2(fd,1) < 0)
+        {
+            perror("dup2");
+            close(fd);
+            return false;
+        }
+        int execv_stat = execv(command[0], command);
+        if (execv_stat == -1)
+        {
+            perror("execv");
+            exit(EXIT_FAILURE);
+        }
+    }
+    
+    else
+    {
+        close(fd);
+    }
+
+
+    if (pid > 0)
+    {
+        pid_t stat;
+        int status;
+        stat = waitpid(pid, &status,0); //WNOHANG OR 0?
+        if (stat == -1) 
+        {
+            perror("waitpid");
+            return false;
+        }
+        
+        //Normal termination
+        if(WIFEXITED(status) != 0)
+        {
+            if(WEXITSTATUS(status) != 0) return false;
+        }
+        else return false;
+
+    }
 
     va_end(args);
 
