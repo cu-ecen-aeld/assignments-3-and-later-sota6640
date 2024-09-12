@@ -4,6 +4,7 @@
 # Editor: Sonal Tamrakar
 # Date: 09/16/2024
 # Brief: manual-linux.sh for Assignment 3 QEMU emulation build
+# Credit: Mastering Embedded Linux Programming Chapter 4
 
 set -e
 set -u
@@ -37,10 +38,24 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
 
-    # TODO: Add your kernel build steps here
+    # kernel build steps here
+
     # Deep cleaning the Kernel build tree, removes all intermediate files
     # including the .config file
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
+
+    # Configure "virt" arm development board that will be simulated in QEMU
+    # Sets up default config
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+
+    #Building a kernel image that will be booted with QEMU to vmlinux target
+    make -j4 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
+
+    #Buid the kernel modules
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
+
+    #Build the devicetree
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
 fi
 
 echo "Adding the Image in outdir"
