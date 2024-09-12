@@ -1,6 +1,9 @@
 #!/bin/bash
 # Script outline to install and build kernel.
 # Author: Siddhant Jajoo.
+# Editor: Sonal Tamrakar
+# Date: 09/16/2024
+# Brief: manual-linux.sh for Assignment 3 QEMU emulation build
 
 set -e
 set -u
@@ -35,6 +38,9 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     git checkout ${KERNEL_VERSION}
 
     # TODO: Add your kernel build steps here
+    # Deep cleaning the Kernel build tree, removes all intermediate files
+    # including the .config file
+    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
 fi
 
 echo "Adding the Image in outdir"
