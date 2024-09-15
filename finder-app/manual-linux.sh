@@ -65,7 +65,7 @@ echo "Adding the Image in outdir"
 # TODO: Copy resulting files generated in step 1.c to outdir
 cp ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ${OUTDIR}
 
-echo "Creating the staging directory for the root filesystem"
+echo "Creating the staging directory for the root filesystem_here"
 cd "$OUTDIR"
 if [ -d "${OUTDIR}/rootfs" ]
 then
@@ -125,10 +125,12 @@ cp -a ${SYSROOT}/lib64/libc.so.6 lib64
 # mknod <name> <type> <major> <minor>
 # Null device is a known major 1 minor 3
 # Console device is known major 5
+echo "sudo mknods of null and console"
 cd ${ROOTFSDIR}
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 600 dev/console c 5 1
 
+echo "sudo mknods of null and console completion"
 # TODO: Clean and build the writer utility
 # First locate the where the directory is given command
 cd ${FINDER_APP_DIR}
