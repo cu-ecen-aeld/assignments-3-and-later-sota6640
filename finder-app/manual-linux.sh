@@ -119,8 +119,18 @@ cp ${SYSROOT}/lib64/libc.so.6 lib64
 
 
 # TODO: Make device nodes
+# mknod <name> <type> <major> <minor>
+# Null device is a known major 1 minor 3
+# Console device is known major 5
+cd ${ROOTFSDIR}
+sudo mknod -m 666 dev/null c 1 3
+sudo mknod -m 600 dev/console c 5 1
 
 # TODO: Clean and build the writer utility
+# First locate the where the directory is given command
+cd ${FINDER_APP_DIR}
+make clean
+make CROSS_COMPILE=${CROSS_COMPILE}
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
