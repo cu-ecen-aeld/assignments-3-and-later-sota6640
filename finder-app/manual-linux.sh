@@ -46,13 +46,10 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     # including the .config file
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
 
-    echo "I am here0"
-
     # Configure "virt" arm development board that will be simulated in QEMU
     # Sets up default config
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
 
-    echo "I am here"
 
     #Building a kernel image that will be booted with QEMU to vmlinux target
     make -j4 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
