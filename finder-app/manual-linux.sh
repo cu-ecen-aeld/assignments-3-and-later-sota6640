@@ -4,7 +4,7 @@
 # Editor: Sonal Tamrakar
 # Date: 09/16/2024
 # Brief: manual-linux.sh for Assignment 3 QEMU emulation build
-# Credit: Mastering Embedded Linux Programming Chapter 4
+# Credit: Mastering Embedded Linux Programming Chapter 4,5
 
 set -e
 set -u
@@ -18,6 +18,7 @@ FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
 export SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
+
 
 if [ $# -lt 1 ]
 then
@@ -39,22 +40,25 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     cd linux-stable
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
-
     # kernel build steps here
 
     # Deep cleaning the Kernel build tree, removes all intermediate files
     # including the .config file
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
 
+    echo "I am here0"
+
     # Configure "virt" arm development board that will be simulated in QEMU
     # Sets up default config
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+
+    echo "I am here"
 
     #Building a kernel image that will be booted with QEMU to vmlinux target
     make -j4 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
 
     #Buid the kernel modules
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
+    #make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
 
     #Build the devicetree
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
@@ -96,11 +100,12 @@ else
 fi
 
 # TODO: Make and install busybox
-make distclean
-make defconfig
+#make distclean
+#make defconfig
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 make CONFIG_PREFIX=${ROOTFSDIR} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
-make 
+
+cd ${ROOTFSDIR}
 
 echo "Library dependencies"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
@@ -110,12 +115,13 @@ ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 # sysroot path for lib64 : /home/stamrakar/Downloads/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc/lib64
 # sysroot path for lib : /home/stamrakar/Downloads/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc/lib
 
+
 # Requesting program interpreter: /lib/ld-linux-aarch64.so.1
 cd ${ROOTFSDIR}
-cp ${SYSROOT}/lib/ld-linux-aarch64.so.1 lib
-cp ${SYSROOT}/lib64/libm.so.6 lib64
-cp ${SYSROOT}/lib64/libresolv.so.2 lib64
-cp ${SYSROOT}/lib64/libc.so.6 lib64
+cp -a ${SYSROOT}/lib/ld-linux-aarch64.so.1 lib
+cp -a ${SYSROOT}/lib64/libm.so.6 lib64
+cp -a ${SYSROOT}/lib64/libresolv.so.2 lib64
+cp -a ${SYSROOT}/lib64/libc.so.6 lib64
 
 
 # TODO: Make device nodes
@@ -134,7 +140,25 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
+cp ${FINDER_APP_DIR}/writer ${ROOTFSDIR}/home
+cp ${FINDER_APP_DIR}/finder.sh ${ROOTFSDIR}/home
+cp ${FINDER_APP_DIR}/finder-test.sh ${ROOTFSDIR}/home
+cp ${FINDER_APP_DIR}/autorun-qemu.sh ${ROOTFSDIR}/home
+
+mkdir -p ${ROOTFSDIR}/home/conf
+cp ${FINDER_APP_DIR}/conf/username.txt ${ROOTFSDIR}/home/conf
+cp ${FINDER_APP_DIR}/conf/assignment.txt ${ROOTFSDIR}/home/conf
+
 
 # TODO: Chown the root directory
+cd ${ROOTFSDIR}
+sudo chown -R root:root *
 
 # TODO: Create initramfs.cpio.gz
+cd ${ROOTFSDIR}
+find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
+
+cd ${OUTDIR}
+gzip -f initramfs.cpio
+
+echo "End of script"
