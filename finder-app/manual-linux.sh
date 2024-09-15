@@ -125,12 +125,12 @@ cp -a ${SYSROOT}/lib64/libc.so.6 lib64
 # mknod <name> <type> <major> <minor>
 # Null device is a known major 1 minor 3
 # Console device is known major 5
-echo "sudo mknods of null and console"
+echo "making device nodes here"
 cd ${ROOTFSDIR}
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 600 dev/console c 5 1
 
-echo "sudo mknods of null and console completion"
+echo "mknods of null and console completion"
 # TODO: Clean and build the writer utility
 # First locate the where the directory is given command
 cd ${FINDER_APP_DIR}
