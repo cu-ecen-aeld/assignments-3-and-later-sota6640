@@ -74,10 +74,8 @@ then
 fi
 
 # TODO: Create necessary base directories
-# Not sure about these two
 mkdir -p ${ROOTFSDIR}
 cd ${ROOTFSDIR}
-# Not sure about these two
 mkdir -p bin dev etc home lib lib64 proc sbin sys tmp usr var
 mkdir -p usr/bin usr/lib usr/sbin
 mkdir -p var/log
@@ -97,8 +95,8 @@ else
 fi
 
 # TODO: Make and install busybox
-make distclean
-make defconfig
+# make distclean
+# make defconfig
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 make CONFIG_PREFIX=${ROOTFSDIR} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 
