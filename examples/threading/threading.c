@@ -49,7 +49,7 @@ void* threadfunc(void* thread_param)
         return thread_param;
     }
 
-    // Thread was completed with success
+    // Thread was completed with success test
     thread_func_args->thread_complete_success = true;
 
     
