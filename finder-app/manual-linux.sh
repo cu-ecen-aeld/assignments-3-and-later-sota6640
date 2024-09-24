@@ -10,7 +10,6 @@ set -e
 set -u
 
 OUTDIR=/tmp/aeld
-ROOTFSDIR=/tmp/aeld/rootfs
 KERNEL_REPO=git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 KERNEL_VERSION=v5.15.163
 BUSYBOX_VERSION=1_33_1
@@ -74,10 +73,8 @@ then
 fi
 
 # TODO: Create necessary base directories
-# Not sure about these two
-mkdir -p ${ROOTFSDIR}
-cd ${ROOTFSDIR}
-# Not sure about these two
+mkdir -p ${OUTDIR}/rootfs
+cd ${OUTDIR}/rootfs
 mkdir -p bin dev etc home lib lib64 proc sbin sys tmp usr var
 mkdir -p usr/bin usr/lib usr/sbin
 mkdir -p var/log
@@ -97,12 +94,12 @@ else
 fi
 
 # TODO: Make and install busybox
-#make distclean
-#make defconfig
+# make distclean
+# make defconfig
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
-make CONFIG_PREFIX=${ROOTFSDIR} ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
+make CONFIG_PREFIX=${OUTDIR}/rootfs ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 
-cd ${ROOTFSDIR}
+cd ${OUTDIR}/rootfs
 
 echo "Library dependencies"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
@@ -114,7 +111,7 @@ ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 
 
 # Requesting program interpreter: /lib/ld-linux-aarch64.so.1
-cd ${ROOTFSDIR}
+cd ${OUTDIR}/rootfs
 cp -a ${SYSROOT}/lib/ld-linux-aarch64.so.1 lib
 cp -a ${SYSROOT}/lib64/libm.so.6 lib64
 cp -a ${SYSROOT}/lib64/libresolv.so.2 lib64
@@ -126,7 +123,7 @@ cp -a ${SYSROOT}/lib64/libc.so.6 lib64
 # Null device is a known major 1 minor 3
 # Console device is known major 5
 echo "making device nodes here"
-cd ${ROOTFSDIR}
+cd ${OUTDIR}/rootfs
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 600 dev/console c 5 1
 
@@ -139,22 +136,21 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
-cp ${FINDER_APP_DIR}/writer ${ROOTFSDIR}/home
-cp ${FINDER_APP_DIR}/finder.sh ${ROOTFSDIR}/home
-cp ${FINDER_APP_DIR}/finder-test.sh ${ROOTFSDIR}/home
-cp ${FINDER_APP_DIR}/autorun-qemu.sh ${ROOTFSDIR}/home
+cp ${FINDER_APP_DIR}/writer ${OUTDIR}/rootfs/home
+cp ${FINDER_APP_DIR}/finder.sh ${OUTDIR}/rootfs/home
+cp ${FINDER_APP_DIR}/finder-test.sh ${OUTDIR}/rootfs/home
+cp ${FINDER_APP_DIR}/autorun-qemu.sh ${OUTDIR}/rootfs/home
 
-mkdir -p ${ROOTFSDIR}/home/conf
-cp ${FINDER_APP_DIR}/conf/username.txt ${ROOTFSDIR}/home/conf
-cp ${FINDER_APP_DIR}/conf/assignment.txt ${ROOTFSDIR}/home/conf
+mkdir -p ${OUTDIR}/rootfs/home/conf
+cp ${FINDER_APP_DIR}/conf/username.txt ${OUTDIR}/rootfs/home/conf
+cp ${FINDER_APP_DIR}/conf/assignment.txt ${OUTDIR}/rootfs/home/conf
 
 
 # TODO: Chown the root directory
-cd ${ROOTFSDIR}
+cd ${OUTDIR}/rootfs
 sudo chown -R root:root *
 
 # TODO: Create initramfs.cpio.gz
-cd ${ROOTFSDIR}
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
 
 cd ${OUTDIR}
