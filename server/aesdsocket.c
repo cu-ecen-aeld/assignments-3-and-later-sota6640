@@ -286,7 +286,9 @@ int main(int argc, char *argv[])
         {
             syslog(LOG_ERR, "server: accept, error here?????");
             perror("server: accept");
-            exit(EXIT_FAILURE);
+            //closeAll();
+            //exit(EXIT_FAILURE);
+            continue;
         }
         else 
         {
