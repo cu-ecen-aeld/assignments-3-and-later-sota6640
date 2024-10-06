@@ -51,6 +51,7 @@ bool daemon_en = false;
 int sockfd , new_fd, recvfile_fd;
 pid_t pid;
 const char *recvfile = "/var/tmp/aesdsocketdata";
+void closeAll();
 
 static void signal_handler ( int signal_number )
 {
@@ -58,6 +59,7 @@ static void signal_handler ( int signal_number )
     {
         syslog(LOG_DEBUG, "Caught signal, exiting");
         caught_sigalarm = true;
+        closeAll();
     }
 }
 
@@ -274,7 +276,7 @@ int main(int argc, char *argv[])
     ssize_t nr;
     bool isPacketValid = false;
 
-    while(1){ //signal to exit this
+    while(!caught_sigalarm){ //signal to exit this
         bytes_read = 0;
         incrementBy = BUF_SIZE;
         isPacketValid = false;
@@ -285,6 +287,10 @@ int main(int argc, char *argv[])
             syslog(LOG_ERR, "server: accept, error here?????");
             perror("server: accept");
             exit(EXIT_FAILURE);
+        }
+        else 
+        {
+            syslog(LOG_DEBUG, "CONNECTED");
         }
         //syslog(LOG_DEBUG, "new_fd is %d", new_fd);
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
