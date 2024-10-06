@@ -30,7 +30,7 @@ clean:
 	-rm -f *.o *.d
 	-rm -f aesdsocket
 
-writer: ${OBJS}
+aesdsocket: ${OBJS}
 	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
 
 depend:
