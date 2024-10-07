@@ -1,4 +1,4 @@
-# !/bin/sh
+#!/bin/sh
 
 case "$1" in
     start)
@@ -14,4 +14,4 @@ case "$1" in
     exit 1
 esac
 
-exit 0 
+exit 0
