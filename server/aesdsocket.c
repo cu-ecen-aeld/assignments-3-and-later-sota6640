@@ -46,13 +46,26 @@
 #define BACKLOG 10 // pending connections
 #define BUF_SIZE 1024
 
-
+typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 
-struct slist_data_s {
+struct thread_info_s{
+    pthread_t threadid;
+    int afd; //accepted fd psot accept() connection.
     bool thread_complete_success;
-    SLIST_ENTRY(slist_data_s) threads;
+    char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
 };
+
+struct slist_data_s {
+
+    thread_info_t thread_info; 
+    SLIST_ENTRY(slist_data_s) nextThread;
+};
+
+SLIST_HEAD(slisthead, slist_data_s) head;
+SLIST_INIT(&head);
+
+
 
 sig_atomic_t sig = 0;
 bool daemon_en = false;
@@ -66,6 +79,7 @@ const char *recvfile = "/var/tmp/aesdsocketdata";
 static void closeAll(int exit_flag);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
+void *threadfunc(void *arg);
 
 static void signal_handler (int signal_number)
 {
@@ -160,6 +174,134 @@ void closeAll(int exit_flag)
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
     exit(exit_flag);
+}
+
+
+void *threadfunc(void *args)
+{
+    my_threads *thread_func_args = (my_threads *) args;
+    bool isPacketValid = false;
+    ssize_t bytes_rx;
+    ssize_t bytes_read;
+    ssize_t supplementBuf = 0;
+    ssize_t supplementSize = BUF_SIZE;
+    ssize_t nr;
+    char *new_line = NULL;
+    char *my_buffer = (char *) malloc(BUF_SIZE);
+    char *send_my_buffer = NULL;
+
+    if(my_buffer == NULL)
+    {
+        syslog(LOG_ERR, "Failed to malloc.");
+        closeAll(EXIT_FAILURE);
+    }
+
+    memset(my_buffer, 0, BUF_SIZE);
+    do{
+            
+            bytes_rx = recv(new_fd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
+            syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
+            if (bytes_rx < 0)
+            {
+                free(my_buffer);
+                perror("server: recv");
+                syslog(LOG_ERR, "server: recv");
+                closeAll(EXIT_FAILURE);
+            }
+            supplementBuf += bytes_rx; 
+            new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
+            if (new_line != NULL)
+            {
+                syslog(LOG_DEBUG, "YAY, slash n found");
+                isPacketValid = true;
+                supplementBuf = new_line - my_buffer + 1; 
+                syslog(LOG_DEBUG, "supplementBuf size within slash found %ld", supplementBuf);
+            }
+
+            else
+            {
+                my_buffer = realloc(my_buffer, supplementSize+BUF_SIZE);
+                if(my_buffer == NULL)
+                {
+                    syslog(LOG_ERR, "Failed to realloc.");
+                    closeAll(EXIT_FAILURE);
+                }
+                supplementSize += BUF_SIZE;
+                memset(my_buffer+supplementBuf, 0 , supplementSize-supplementBuf);
+            }
+
+    }while (isPacketValid == false);
+
+
+    //new line character has been found
+    if(isPacketValid == true)
+    {   
+        //my_buffer[addibuffer]= '\0';
+        //ssize_t write_size = new_line - my_buffer + 1;
+        syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
+        nr = write(recvfile_fd, my_buffer, supplementBuf);
+        syslog(LOG_DEBUG, "nr is %ld",nr);
+        if (nr != supplementBuf)
+        {
+            /*error*/
+            int err1 = errno;
+            syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
+            syslog(LOG_ERR, "error string is %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+
+        syslog(LOG_DEBUG, "Write completed to recvfile_fd");
+    }
+
+
+    free(my_buffer);
+
+    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
+    {
+        syslog(LOG_ERR, "server: lseek");
+        perror("server: lseek");
+        closeAll(EXIT_FAILURE);
+    }
+    
+    syslog(LOG_DEBUG, "lseek pass");
+    send_my_buffer = (char *) malloc(supplementBuf);
+    if (send_my_buffer == NULL)
+    {
+        syslog(LOG_ERR, "Failed to malloc sending buffer.");
+        closeAll(EXIT_FAILURE);
+    }
+
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, supplementBuf)) > 0) {
+        syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
+        //syslog(LOG_DEBUG, "bytes_read inside while is %ld", bytes_read);
+        // for( int i = 0; i < bytes_read; i++)
+        // {
+        //     syslog(LOG_DEBUG, "%c", send_my_buffer[i]);
+        // }
+
+        //syslog(LOG_DEBUG, "strlen of send_my_buffer is %ld", strlen(send_my_buffer));
+        //syslog(LOG_DEBUG, "new_fd heree is %d", new_fd);
+        if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
+        {
+            syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
+            syslog(LOG_ERR,"server: send");
+            perror("server: send");
+            closeAll(EXIT_FAILURE);
+        }
+        else
+        {
+            syslog(LOG_DEBUG, "send pass");
+        }
+    }
+
+    close(new_fd);
+    free(send_my_buffer);
+    free(new_line);
+    syslog(LOG_DEBUG, "Closed connection from %s", thread_func_args->ip4);
+    syslog(LOG_DEBUG, "_________________________________________________________");
+
+    thread_func_args->thread_complete_success = true;
+    return args;
 }
 
 int main(int argc, char *argv[])
@@ -265,9 +407,9 @@ int main(int argc, char *argv[])
 
     
     
-    ssize_t incrementBy;
+    ssize_t supplementSize;
     ssize_t bytes_rx = 0;
-    ssize_t addibuffer;
+    ssize_t supplementBuf;
     ssize_t bytes_read;
     char *send_my_buffer = NULL;
     char *new_line = NULL;
@@ -276,7 +418,7 @@ int main(int argc, char *argv[])
 
     while(!sig){ 
         bytes_read = 0;
-        incrementBy = BUF_SIZE;
+        supplementSize = BUF_SIZE;
         isPacketValid = false;
         peer_addrlen = sizeof(peer_addr);
         if((new_fd = accept(sockfd, (struct sockaddr *)&peer_addr, &peer_addrlen)) == -1 )
@@ -287,137 +429,56 @@ int main(int argc, char *argv[])
         }
         
         syslog(LOG_DEBUG, "CONNECTED");
-        
-        // int rc;
-        // rc = pthread_create(threadid, NULL, threadfunc, (void*)new_fd);
-        // if (rc != 0)
-        // {   
-        //     ERROR_LOG("Failed to pthread_create(), error was %d", rc);
-        //     free(threadp);
-        //     return false;
-        // }
-
-
-        //create thread here ?
 
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
         syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
 
-        addibuffer = 0;
-        char *my_buffer = (char *) malloc(BUF_SIZE);
-        if (my_buffer == NULL)
+        my_threads *thread_data = (my_threads *)malloc(sizeof(my_threads));
+        if (thread_data == NULL)
         {
-            syslog(LOG_ERR, "Failed to malloc.");
-            closeAll(EXIT_FAILURE);
+            syslog(LOG_ERR, "server: thread allocation");
+            perror("server: thread allocation");
+            continue;
+            //should I be exiting everything here or just keep trying
         }
-        memset(my_buffer, 0, BUF_SIZE);
-        do{
-            
-            bytes_rx = recv(new_fd, my_buffer + addibuffer, BUF_SIZE-1, 0); 
-            syslog(LOG_DEBUG, "i have received %ld bytes", bytes_rx);
-            if (bytes_rx < 0)
-            {
-                free(my_buffer);
-                perror("server: recv");
-                syslog(LOG_ERR, "server: recv");
-                closeAll(EXIT_FAILURE);
-            }
-            addibuffer += bytes_rx; 
-            new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
-            if (new_line != NULL)
-            {
-                syslog(LOG_DEBUG, "YAY, slash n found");
-                isPacketValid = true;
-                addibuffer = new_line - my_buffer + 1; 
-                syslog(LOG_DEBUG, "addibuffer size within slash found %ld", addibuffer);
-            }
 
-            else
+        thread_data->afd = new_fd;
+        thread_data->thread_complete_success = false;
+        strcpy(thread_data->ip4, ip4);
+
+        int rc;
+
+        if((rc = pthread_create(&thread_data->threadid, NULL, threadfunc, (void*)thread_data)) != 0)
+        {
+            syslog("Failed to pthread_create(), error was %d", rc);
+            perror("Failed to pthread_create()");
+            free(thread_data);
+            close(new_fd);
+            continue;
+        }
+
+        SLIST_INSERT_HEAD(&head, thread_data, nextThread);
+        int join_rc;
+        my_threads *datap = NULL;
+        SLIST_FOREACH(datap, &head, nextThread) {
+            if(datap->thread_complete_success)
             {
-                my_buffer = realloc(my_buffer, incrementBy+BUF_SIZE);
-                if(my_buffer == NULL)
+                join_rc = pthread_join(datap->threadid, NULL);
+                if(join_rc != 0) 
                 {
-                    syslog(LOG_ERR, "Failed to realloc.");
-                    closeAll(EXIT_FAILURE);
+                    syslog(LOG_ERR, "Failed to pthread_join(), error was %d", join_rc);
+                    perror("Failed to pthread_join()");
+                    continue;
                 }
-                incrementBy += BUF_SIZE;
-                memset(my_buffer+addibuffer, 0 , incrementBy-addibuffer);
+                SLIST_REMOVE(&head, datap, my_threads, nextThread);
+                free(datap);
             }
 
-        }while (isPacketValid == false);
-
-        //new line character has been found, now i want to send?
-        //append happens here, writing
-        if(isPacketValid == true)
-        {   
-            //my_buffer[addibuffer]= '\0';
-            //ssize_t write_size = new_line - my_buffer + 1;
-            syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
-            nr = write(recvfile_fd, my_buffer, addibuffer);
-            syslog(LOG_DEBUG, "nr is %ld",nr);
-            if (nr != addibuffer)
-            {
-                /*error*/
-                int err1 = errno;
-                syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
-                syslog(LOG_ERR, "error string is %s", strerror(errno));
-                closeAll(EXIT_FAILURE);
-            }
-
-            syslog(LOG_DEBUG, "Write completed to recvfile_fd");
         }
 
-
-        free(my_buffer);
-
-        if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
-        {
-            syslog(LOG_ERR, "server: lseek");
-            perror("server: lseek");
-            closeAll(EXIT_FAILURE);
-        }
-
-        syslog(LOG_DEBUG, "lseek pass");
-        //syslog(LOG_DEBUG, "addibuffer is %ld", addibuffer);
-        send_my_buffer = (char *) malloc(addibuffer);
-        if (send_my_buffer == NULL)
-        {
-            syslog(LOG_ERR, "Failed to malloc sending buffer.");
-            closeAll(EXIT_FAILURE);
-        }
-
-        
-        //int errno_read; 
-        //syslog(LOG_DEBUG, "I am here. Just before the while. addibuffer is %ld, %d", addibuffer, recvfile_fd);
-        while ((bytes_read = read(recvfile_fd, send_my_buffer, addibuffer)) > 0) {
-            syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
-            //syslog(LOG_DEBUG, "bytes_read inside while is %ld", bytes_read);
-            // for( int i = 0; i < bytes_read; i++)
-            // {
-            //     syslog(LOG_DEBUG, "%c", send_my_buffer[i]);
-            // }
-
-            //syslog(LOG_DEBUG, "strlen of send_my_buffer is %ld", strlen(send_my_buffer));
-            //syslog(LOG_DEBUG, "new_fd heree is %d", new_fd);
-            if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
-            {
-                syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
-                syslog(LOG_ERR,"server: send");
-                perror("server: send");
-                closeAll(EXIT_FAILURE);
-            }
-            else
-            {
-                syslog(LOG_DEBUG, "send pass");
-            }
-        }
-
-        close(new_fd);
-        free(send_my_buffer);
-        syslog(LOG_DEBUG, "Closed connection from %s", ip4);
-        syslog(LOG_DEBUG, "_________________________________________________________");
     }
 
-    syslog(LOG_DEBUG, "AM I EVER HERE?");
+    syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
+    return 0;
 }
