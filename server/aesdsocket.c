@@ -36,6 +36,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <linux/fs.h>
+#include <pthread.h>
+#include <sys/queue.h>
 
 #define PORT "9000" // the port users will be connecting to 
 //const char* port = "9000";
@@ -45,22 +47,59 @@
 #define BUF_SIZE 1024
 
 
-bool caught_sigalarm = false;
+typedef struct slist_data_s my_threads;
+
+struct slist_data_s {
+    bool thread_complete_success;
+    SLIST_ENTRY(slist_data_s) threads;
+};
+
+sig_atomic_t sig = 0;
 bool daemon_en = false;
 
-int sockfd , new_fd, recvfile_fd;
+int sockfd = -1;
+int new_fd = -1;
+int recvfile_fd = -1;
+
 pid_t pid;
 const char *recvfile = "/var/tmp/aesdsocketdata";
-void closeAll();
+static void closeAll(int exit_flag);
+static void init_sigHandler(void);
+static void signal_handler(int signal_number);
 
-static void signal_handler ( int signal_number )
+static void signal_handler (int signal_number)
 {
-    if ( signal_number == SIGINT || signal_number == SIGTERM )
+    if (signal_number == SIGINT || signal_number == SIGTERM)
     {
         syslog(LOG_DEBUG, "Caught signal, exiting");
-        caught_sigalarm = true;
-        closeAll();
+        sig = 1;
     }
+}
+
+
+static void init_sigHandler(void)
+{
+    struct sigaction sig1;
+    memset(&sig1, 0, sizeof(struct sigaction));
+    sig1.sa_handler = signal_handler;
+    if( sigaction(SIGINT, &sig1, NULL) != 0)
+    {
+        syslog(LOG_ERR, "Error %d (%s) registering for SIGINT", errno, strerror(errno));
+        perror("sigint: fail");
+        closeAll(EXIT_FAILURE);
+    }
+
+    struct sigaction sig2;
+    memset(&sig2, 0, sizeof(struct sigaction));
+    sig2.sa_handler = signal_handler;
+    if( sigaction(SIGTERM, &sig2, NULL) != 0)
+    {
+        syslog(LOG_ERR, "Error %d (%s) registering for SIGTERM", errno, strerror(errno));
+        perror("sigterm: fail");
+        closeAll(EXIT_FAILURE);
+    }
+
+    return;
 }
 
 
@@ -108,17 +147,19 @@ static int create_daemon()
 }
 
 
-void closeAll()
+void closeAll(int exit_flag)
 {
     syslog(LOG_DEBUG, "PERFORMING CLEANUP.");
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
+    if(recvfile_fd != -1) close(recvfile_fd);
     if(remove(recvfile) != 0)
     {
         syslog(LOG_ERR, "File removal not successful");
     }
-    closelog();
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
+    closelog();
+    exit(exit_flag);
 }
 
 int main(int argc, char *argv[])
@@ -129,48 +170,16 @@ int main(int argc, char *argv[])
     syslog(LOG_DEBUG, "__________________________./full-test.sh________________________");
 
     int                             status;
-    // int                             sockfd, new_fd;
-    // char                            buf[BUF_SIZE];
-    // socklen_t                       sin_size;
-    // ssize_t                         nread;
     socklen_t                       peer_addrlen;
     struct addrinfo                 hints;
     struct addrinfo                 *servinfo;
-    //ssize_t num_bytes_rx;
-    /*
-    servInfo is just a pointer location  on the stack. Will point to the results. 
-    Haven't reserved location for the actual addrinfo structure
-    */
     struct sockaddr_in              peer_addr;
-    // struct sockaddr_in              sa;
     char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
     int yes=1;
-    // int recvfile_fd;
-    //Declare the initial buffer
 
 
-    
-
-    // signal(SIGINT, signal_handler);
-    // signal(SIGTERM, signal_handler);
-    // Setup SIGINT and SIGTERM
-    struct sigaction sig1;
-    memset(&sig1, 0, sizeof(struct sigaction));
-    sig1.sa_handler = signal_handler;
-    if( sigaction(SIGINT, &sig1, NULL) != 0)
-    {
-        syslog(LOG_ERR, "Error %d (%s) registering for SIGINT", errno, strerror(errno));
-        perror("sigint: fail");
-    }
-
-    struct sigaction sig2;
-    memset(&sig2, 0, sizeof(struct sigaction));
-    sig2.sa_handler = signal_handler;
-    if( sigaction(SIGTERM, &sig2, NULL) != 0)
-    {
-        syslog(LOG_ERR, "Error %d (%s) registering for SIGTERM", errno, strerror(errno));
-        perror("sigterm: fail");
-    }
+    //Initializes the signal handlers SIGINT and SIGTERM
+    init_sigHandler();
     
 
     if ((argc == 2) && (strcmp(argv[1], "-d") == 0))
@@ -187,9 +196,8 @@ int main(int argc, char *argv[])
         /*error*/
         int err = errno;
         syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
-        exit(1);
+        closeAll(EXIT_FAILURE);
     }
-    //syslog(LOG_DEBUG, "recvfile_fd is %d", recvfile_fd);
 
 
     memset(&hints, 0, sizeof(hints)); //empty the struct
@@ -197,19 +205,13 @@ int main(int argc, char *argv[])
     hints.ai_socktype = SOCK_STREAM;   // Datagram socket
     hints.ai_flags = AI_PASSIVE;      // For wildcard IP address, fill in my IP for me
 
-    //Not sure if these need to be initialized
-    // hints.ai_protocol = 0;            // Any protocol
-    // hints.ai_canonname = NULL;
-    // hints.ai_addr = NULL;
-    // hints.ai_next = NULL;
-
 
     // &servInfo is the not the pointer to the addrinfo struct,
     // but rather pointer to the location to store the pointer to that addrinfo
     if ((status = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0)
     {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "getaddrinfo pass");
@@ -218,7 +220,7 @@ int main(int argc, char *argv[])
     if ((sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) == -1)
     {
         perror("server: socket");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "socket pass");
@@ -226,7 +228,7 @@ int main(int argc, char *argv[])
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
     {
         perror("server: setsockopt");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "setsockopt pass");
@@ -234,25 +236,22 @@ int main(int argc, char *argv[])
     if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
     {
         perror("server: bind");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
+
+    syslog(LOG_DEBUG, "bind pass");
 
     freeaddrinfo(servinfo);
 
-    // when in daemon mode the program should fork after ensuring it can bind to port 9000.
     if(daemon_en)
     {
         if(create_daemon() != 0)
         {
+            syslog(LOG_ERR, "serve: daemon");
             perror("server: daemon");
-            exit(EXIT_FAILURE);
+            closeAll(EXIT_FAILURE);
         }
-
     }
-
- 
-
-    syslog(LOG_DEBUG, "bind pass");
 
     if (listen(sockfd, BACKLOG) == -1)
     {
@@ -270,46 +269,48 @@ int main(int argc, char *argv[])
     ssize_t bytes_rx = 0;
     ssize_t addibuffer;
     ssize_t bytes_read;
-    //ssize_t total_size;
     char *send_my_buffer = NULL;
     char *new_line = NULL;
     ssize_t nr;
     bool isPacketValid = false;
 
-    while(!caught_sigalarm){ //signal to exit this
+    while(!sig){ 
         bytes_read = 0;
         incrementBy = BUF_SIZE;
         isPacketValid = false;
         peer_addrlen = sizeof(peer_addr);
-        //new_fd is the accepted fd
         if((new_fd = accept(sockfd, (struct sockaddr *)&peer_addr, &peer_addrlen)) == -1 )
         {
-            syslog(LOG_ERR, "server: accept, error here?????");
+            syslog(LOG_ERR, "server: accept");
             perror("server: accept");
-            //closeAll();
-            //exit(EXIT_FAILURE);
             continue;
         }
-        else 
-        {
-            syslog(LOG_DEBUG, "CONNECTED");
-        }
-        //syslog(LOG_DEBUG, "new_fd is %d", new_fd);
+        
+        syslog(LOG_DEBUG, "CONNECTED");
+        
+        // int rc;
+        // rc = pthread_create(threadid, NULL, threadfunc, (void*)new_fd);
+        // if (rc != 0)
+        // {   
+        //     ERROR_LOG("Failed to pthread_create(), error was %d", rc);
+        //     free(threadp);
+        //     return false;
+        // }
+
+
+        //create thread here ?
+
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
         syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
 
         addibuffer = 0;
-        //total_size = BUF_SIZE;
         char *my_buffer = (char *) malloc(BUF_SIZE);
         if (my_buffer == NULL)
         {
             syslog(LOG_ERR, "Failed to malloc.");
-            close(new_fd);
-            exit(EXIT_FAILURE);
+            closeAll(EXIT_FAILURE);
         }
-        // set buffer values all to zero
         memset(my_buffer, 0, BUF_SIZE);
-
         do{
             
             bytes_rx = recv(new_fd, my_buffer + addibuffer, BUF_SIZE-1, 0); 
@@ -318,8 +319,8 @@ int main(int argc, char *argv[])
             {
                 free(my_buffer);
                 perror("server: recv");
-                syslog(LOG_ERR, "recv: error??");
-                exit(EXIT_FAILURE);
+                syslog(LOG_ERR, "server: recv");
+                closeAll(EXIT_FAILURE);
             }
             addibuffer += bytes_rx; 
             new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
@@ -337,14 +338,11 @@ int main(int argc, char *argv[])
                 if(my_buffer == NULL)
                 {
                     syslog(LOG_ERR, "Failed to realloc.");
-                    close(new_fd);
-                    exit(EXIT_FAILURE);
+                    closeAll(EXIT_FAILURE);
                 }
                 incrementBy += BUF_SIZE;
                 memset(my_buffer+addibuffer, 0 , incrementBy-addibuffer);
-                //addibuffer = 0;
             }
-        //syslog(LOG_DEBUG, "I am here once only. %d", isPacketValid);
 
         }while (isPacketValid == false);
 
@@ -363,7 +361,7 @@ int main(int argc, char *argv[])
                 int err1 = errno;
                 syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
                 syslog(LOG_ERR, "error string is %s", strerror(errno));
-                exit(EXIT_FAILURE);
+                closeAll(EXIT_FAILURE);
             }
 
             syslog(LOG_DEBUG, "Write completed to recvfile_fd");
@@ -374,18 +372,18 @@ int main(int argc, char *argv[])
 
         if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
         {
-            syslog(LOG_ERR, "lseek error");
-            perror("lseek");
+            syslog(LOG_ERR, "server: lseek");
+            perror("server: lseek");
+            closeAll(EXIT_FAILURE);
         }
 
         syslog(LOG_DEBUG, "lseek pass");
-        syslog(LOG_DEBUG, "addibuffer is %ld", addibuffer);
+        //syslog(LOG_DEBUG, "addibuffer is %ld", addibuffer);
         send_my_buffer = (char *) malloc(addibuffer);
         if (send_my_buffer == NULL)
         {
             syslog(LOG_ERR, "Failed to malloc sending buffer.");
-            close(new_fd);
-            exit(EXIT_FAILURE);
+            closeAll(EXIT_FAILURE);
         }
 
         
@@ -406,29 +404,20 @@ int main(int argc, char *argv[])
                 syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
                 syslog(LOG_ERR,"server: send");
                 perror("server: send");
-                exit(EXIT_FAILURE);
+                closeAll(EXIT_FAILURE);
             }
             else
             {
                 syslog(LOG_DEBUG, "send pass");
             }
         }
-        //errno_read = errno;
-
-        // syslog(LOG_DEBUG, "bytes_read after while is %ld", bytes_read);
-        // syslog(LOG_ERR, "errno is %d", errno_read);
-        // syslog(LOG_ERR, "Error message: %s", strerror(errno));
-
 
         close(new_fd);
         free(send_my_buffer);
-        
         syslog(LOG_DEBUG, "Closed connection from %s", ip4);
         syslog(LOG_DEBUG, "_________________________________________________________");
     }
 
     syslog(LOG_DEBUG, "AM I EVER HERE?");
-    closeAll();
-
-    //return 0;
+    closeAll(EXIT_SUCCESS);
 }
