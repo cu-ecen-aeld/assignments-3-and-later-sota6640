@@ -37,7 +37,8 @@
 #include <signal.h>
 #include <linux/fs.h>
 #include <pthread.h>
-#include <sys/queue.h>
+//#include <sys/queue.h>
+#include "queue.h"
 
 #define PORT "9000" // the port users will be connecting to 
 //const char* port = "9000";
@@ -48,7 +49,7 @@
 
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
-pthread_mutex_t writeSocket;
+pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 
 
 struct thread_info_s{
@@ -173,6 +174,7 @@ void closeAll(int exit_flag)
     {
         syslog(LOG_ERR, "File removal not successful");
     }
+    pthread_mutex_destroy(&writeSocket);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
     exit(exit_flag);
@@ -201,6 +203,7 @@ void *threadfunc(void *args)
     }
 
     memset(my_buffer, 0, BUF_SIZE);
+
     do{
             
             bytes_rx = recv(new_fd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
@@ -237,10 +240,13 @@ void *threadfunc(void *args)
     }while (isPacketValid == false);
 
 
+
     //new line character has been found
     if(isPacketValid == true)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
+
+
 
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
@@ -248,8 +254,6 @@ void *threadfunc(void *args)
             syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
             perror("pthread mutex_lock failed");
         }
-
-        
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
         rc = pthread_mutex_unlock(&writeSocket);
@@ -270,20 +274,14 @@ void *threadfunc(void *args)
         }
 
         syslog(LOG_DEBUG, "Write completed to recvfile_fd");
+
     }
 
 
     free(my_buffer);
-   
+    my_buffer = NULL;
 
-    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
-    {
-        syslog(LOG_ERR, "server: lseek");
-        perror("server: lseek");
-        closeAll(EXIT_FAILURE);
-    }
-    
-    syslog(LOG_DEBUG, "lseek pass");
+
     send_my_buffer = (char *) malloc(supplementBuf);
     if (send_my_buffer == NULL)
     {
@@ -291,36 +289,58 @@ void *threadfunc(void *args)
         closeAll(EXIT_FAILURE);
     }
 
+   
+
+    rc = pthread_mutex_lock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
+    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
+    {
+        syslog(LOG_ERR, "server: lseek");
+        perror("server: lseek");
+        closeAll(EXIT_FAILURE);
+    }
+    syslog(LOG_DEBUG, "lseek pass");
+
+
     while ((bytes_read = read(recvfile_fd, send_my_buffer, supplementBuf)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
-        //syslog(LOG_DEBUG, "bytes_read inside while is %ld", bytes_read);
-        // for( int i = 0; i < bytes_read; i++)
-        // {
-        //     syslog(LOG_DEBUG, "%c", send_my_buffer[i]);
-        // }
-
-        //syslog(LOG_DEBUG, "strlen of send_my_buffer is %ld", strlen(send_my_buffer));
-        //syslog(LOG_DEBUG, "new_fd heree is %d", new_fd);
         if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
             syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
             syslog(LOG_ERR,"server: send");
+            rc = pthread_mutex_unlock(&writeSocket);
+            if (rc != 0)
+            {
+                syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+                perror("pthread mutex_unlock failed");
+            }
             perror("server: send");
             closeAll(EXIT_FAILURE);
         }
         else
         {
-            free(send_my_buffer);
             syslog(LOG_DEBUG, "send passed");
+            free(send_my_buffer);
+            send_my_buffer = NULL;
         }
     }
 
+    rc = pthread_mutex_unlock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+        perror("pthread mutex_unlock failed");
+    }
 
-    
-    syslog(LOG_DEBUG, "Closed connection from %s", thread_func_args->thread_info.ip4);
     syslog(LOG_DEBUG, "_________________________________________________________");
     thread_func_args->thread_info.thread_complete_success = true;
     close(new_fd);
+    syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
     pthread_exit(NULL);
 }
 
@@ -339,7 +359,7 @@ int main(int argc, char *argv[])
     char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
     int yes=1;
     SLIST_INIT(&head);
-    pthread_mutex_init(&writeSocket, NULL);
+    //pthread_mutex_init(&writeSocket, NULL);
 
     //Initializes the signal handlers SIGINT and SIGTERM
     init_sigHandler();
@@ -438,7 +458,7 @@ int main(int argc, char *argv[])
             continue;
         }
         
-        syslog(LOG_DEBUG, "CONNECTED");
+        syslog(LOG_DEBUG, "CONNECTED, new_fd is %d", new_fd);
 
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
         syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
@@ -460,7 +480,7 @@ int main(int argc, char *argv[])
 
         int rc;
 
-        if((rc = pthread_create(&thread_data->thread_info.threadid, NULL, threadfunc, &(thread_data->thread_info))) != 0)
+        if((rc = pthread_create(&thread_data->thread_info.threadid, NULL, threadfunc, (void*) &(thread_data->thread_info))) != 0)
         {
             syslog(LOG_ERR, "Failed to pthread_create(), error was %d", rc);
             perror("Failed to pthread_create()");
@@ -477,8 +497,11 @@ int main(int argc, char *argv[])
 
         SLIST_INSERT_HEAD(&head, thread_data, nextThread);
         int join_rc;
-        my_threads *datap, *temp;
-        SLIST_FOREACH(datap, &head, nextThread) {
+        my_threads *datap = NULL;
+        my_threads *temp = NULL;
+
+        SLIST_FOREACH_SAFE(datap, &head, nextThread, temp)
+        {
             if(datap->thread_info.thread_complete_success)
             {
                 join_rc = pthread_join(datap->thread_info.threadid, NULL);
@@ -488,18 +511,15 @@ int main(int argc, char *argv[])
                     perror("Failed to pthread_join()");
                     continue;
                 }
-                syslog(LOG_DEBUG, "Joined");
-
-                temp = SLIST_NEXT(datap, nextThread);
+                syslog(LOG_DEBUG, "Joined thread %lu", datap->thread_info.threadid);
                 SLIST_REMOVE(&head, datap, slist_data_s, nextThread);
                 free(datap);
-                datap = temp;
+                datap = NULL;
             }
             else
             {
-                syslog(LOG_DEBUG, "I did not join on threadID = %lu", thread_data->thread_info.threadid);
+                syslog(LOG_DEBUG, "I did not join on threadID = %lu", datap->thread_info.threadid);
             }
-
         }
     }
 
