@@ -182,6 +182,7 @@ void closeAll(int exit_flag)
 void *threadfunc(void *args)
 {
     my_threads *thread_func_args = (my_threads *) args;
+    syslog(LOG_DEBUG, "I have entered this thread with threadID = %lu", thread_func_args->thread_info.threadid);
     bool isPacketValid = false;
     ssize_t bytes_rx;
     ssize_t bytes_read;
@@ -309,20 +310,18 @@ void *threadfunc(void *args)
         }
         else
         {
+            free(send_my_buffer);
             syslog(LOG_DEBUG, "send passed");
         }
     }
 
 
-    syslog(LOG_DEBUG, "This here");
+    
     syslog(LOG_DEBUG, "Closed connection from %s", thread_func_args->thread_info.ip4);
     syslog(LOG_DEBUG, "_________________________________________________________");
     thread_func_args->thread_info.thread_complete_success = true;
     close(new_fd);
-    free(send_my_buffer);
-    free(new_line);
-    syslog(LOG_DEBUG, "FINISHE");
-    return args;
+    pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[])
@@ -473,11 +472,12 @@ int main(int argc, char *argv[])
         else 
         {
             syslog(LOG_DEBUG, "pthread_created successfully");
+            syslog(LOG_DEBUG, "The threadID is %lu.", thread_data->thread_info.threadid);
         }
 
         SLIST_INSERT_HEAD(&head, thread_data, nextThread);
         int join_rc;
-        my_threads *datap = NULL;
+        my_threads *datap, *temp;
         SLIST_FOREACH(datap, &head, nextThread) {
             if(datap->thread_info.thread_complete_success)
             {
@@ -489,12 +489,18 @@ int main(int argc, char *argv[])
                     continue;
                 }
                 syslog(LOG_DEBUG, "Joined");
+
+                temp = SLIST_NEXT(datap, nextThread);
                 SLIST_REMOVE(&head, datap, slist_data_s, nextThread);
                 free(datap);
+                datap = temp;
+            }
+            else
+            {
+                syslog(LOG_DEBUG, "I did not join on threadID = %lu", thread_data->thread_info.threadid);
             }
 
         }
-
     }
 
     syslog(LOG_DEBUG, "Do I reach here?");
