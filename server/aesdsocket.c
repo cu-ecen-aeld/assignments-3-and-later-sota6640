@@ -50,6 +50,7 @@
 #define BACKLOG (10) // pending connections
 #define BUF_SIZE 1024
 #define TSTAMP_INTERVAL (10)
+#define TIMESTAMP_INTERVAL (10)
 
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
@@ -57,10 +58,12 @@ static timer_t timerid;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
+//pthread_mutex_t timer_mutex;
 
 
 struct thread_info_s{
     pthread_t threadid;
+    //int write_file_fd;
     int afd; //accepted fd psot accept() connection.
     bool thread_complete_success;
     char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
@@ -92,9 +95,9 @@ static void closeAll(int exit_flag);
 static void initTimer(void);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
-//static void timer_handler(void);
 void *threadfunc(void *arg);
 void *threadtimerfunc(void *arg);
+void timer_handler(int signo);
 
 static void signal_handler (int signal_number)
 {
@@ -198,6 +201,8 @@ static void initTimer(void)
     return;
 }
 
+
+
 void closeAll(int exit_flag)
 {
     //int rc;
@@ -212,6 +217,8 @@ void closeAll(int exit_flag)
 
     timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
+    pthread_mutex_destroy(&ll_lock);
+    pthread_mutex_destroy(&size_val);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
     exit(exit_flag);
@@ -268,6 +275,22 @@ void *threadtimerfunc(void *args)
                 perror("pthread mutex_unlock failed");
             }
             continue;
+        }
+
+        rc = pthread_mutex_lock(&size_val);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
+
+        total_size += strlen(timestamp);
+
+        rc = pthread_mutex_unlock(&size_val);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
+            perror("pthread mutex_lock failed");
         }
 
         rc = pthread_mutex_unlock(&writeSocket);
@@ -566,6 +589,7 @@ int main(int argc, char *argv[])
 
 
     initTimer();
+    //initTimer2();
     
     while(!sig){ 
         
