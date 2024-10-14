@@ -92,8 +92,9 @@ static void closeAll(int exit_flag);
 static void initTimer(void);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
-static void timer_handler(int signal_number);
+//static void timer_handler(void);
 void *threadfunc(void *arg);
+void *threadtimerfunc(void *arg);
 
 static void signal_handler (int signal_number)
 {
@@ -102,48 +103,6 @@ static void signal_handler (int signal_number)
         syslog(LOG_DEBUG, "Caught signal, exiting");
         sig = 1;
     }
-}
-
-static void timer_handler(int signal_number)
-{
-    int rc;
-    ssize_t nr;
-    ssize_t strf_ret;
-    time_t now;
-    struct tm *ttime;
-    char curr_tstamp[50];
-    time(&now);
-    ttime = localtime(&now);
-   
-
-    strf_ret = strftime(curr_tstamp, sizeof(curr_tstamp), "timestamp:%Y %b %d %H:%M:%S\n", ttime);
-
-    if (!strf_ret)
-    {
-        syslog(LOG_ERR, "strftime error, receiving 0 bytes");
-    }
-
-    rc = pthread_mutex_lock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
-
-    nr = write(recvfile_fd, curr_tstamp, strf_ret);
-
-    rc = pthread_mutex_unlock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-        perror("pthread mutex_unlock failed");
-    }
-
-    if(nr != strf_ret)
-    {
-        syslog(LOG_DEBUG, "Inconsistent bytes written");
-    }
-    
 }
 
 static void init_sigHandler(void)
@@ -217,44 +176,25 @@ static int create_daemon()
 
 static void initTimer(void)
 {
-    struct sigaction sigt;
-    struct sigevent sev;
-    struct itimerspec mytime;
-
-    memset(&sigt, 0, sizeof(struct sigaction));
-    sigt.sa_handler = timer_handler;
-    if( sigaction(SIGALRM, &sigt, NULL) != 0)
+    pthread_t timertid;
+    my_threads *timer_thread = (my_threads *)malloc(sizeof(my_threads));
+    if (timer_thread == NULL)
     {
-        syslog(LOG_ERR, "Error %d (%s) registering for SIGALRM", errno, strerror(errno));
-        perror("sigalrm: fail");
-        closeAll(EXIT_FAILURE);
+        syslog(LOG_ERR, "server: timer thread allocation");
+        perror("server: timer thread allocation");
+        //should I be exiting everything here or just keep trying
     }
-
-    sev.sigev_notify = SIGEV_SIGNAL;
-    //sev.sigev_notify_function = &timer_handler;
-    sev.sigev_signo = SIGALRM;
-    if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) 
+    else
     {
-        perror("initTimer: timer_create");
-        syslog(LOG_ERR, "Error creating timer: %s", strerror(errno));
-        return;
+        int timer_rc;
+        if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, (void*) &(timer_thread->thread_info))) != 0)
+        {
+            syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
+            perror("Failed to pthread_create() timer_thread");
+            free(timer_thread);
+        }
     }
-
-    mytime.it_value.tv_sec = TSTAMP_INTERVAL;
-    mytime.it_value.tv_nsec = 0;
-    mytime.it_interval.tv_sec = TSTAMP_INTERVAL;
-    mytime.it_interval.tv_nsec = 0;
-
-
-
-    if(timer_settime(timerid, 0, &mytime, NULL) == -1)
-    {
-        perror("initTimer: timer_settime");
-        syslog(LOG_ERR, "Timer couldn't be started: %s", strerror(errno));
-    }
-
-
-
+    syslog(LOG_DEBUG, "Timer thread created successfully");
     return;
 }
 
@@ -265,10 +205,10 @@ void closeAll(int exit_flag)
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    // if(remove(recvfile) != 0)
-    // {
-    //    syslog(LOG_ERR, "File removal not successful");
-    // }
+    if(remove(recvfile) != 0)
+    {
+       syslog(LOG_ERR, "File removal not successful");
+    }
 
     timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
@@ -278,6 +218,67 @@ void closeAll(int exit_flag)
 }
 
 
+void *threadtimerfunc(void *args)
+{
+    time_t now;
+    struct tm *tm;
+    char timestamp[100];
+    struct timespec ts;
+    ts.tv_sec = 10;
+    ts.tv_nsec = 0;
+    time_t start, end;
+    start = time(NULL);
+    int rc;
+
+    while(!sig)
+    {
+
+        syslog(LOG_DEBUG, "Starting sleep at %ld", start);
+
+        clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
+
+        end = time(NULL);
+        syslog(LOG_DEBUG, "Ending sleep at %ld, slept for %ld seconds", end, end-start);
+
+
+        now = time(NULL);
+
+        tm = localtime(&now);
+        
+
+        if(strftime(timestamp, sizeof(timestamp), "timestamp:%Y-%m-%d %H:%M:%S\n", tm)==0)
+        {
+            syslog(LOG_ERR,"strftime failed");
+            continue;
+        }
+
+        rc = pthread_mutex_lock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
+        if(write(recvfile_fd, timestamp, strlen(timestamp))==-1)
+        {
+            syslog(LOG_ERR, "write failed to timestamp");
+            rc = pthread_mutex_unlock(&writeSocket);
+            if (rc != 0)
+            {
+                syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+                perror("pthread mutex_unlock failed");
+            }
+            continue;
+        }
+
+        rc = pthread_mutex_unlock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+            perror("pthread mutex_unlock failed");
+        }
+    }
+    return NULL;
+}
 void *threadfunc(void *args)
 {
     my_threads *thread_func_args = (my_threads *) args;
@@ -303,7 +304,7 @@ void *threadfunc(void *args)
     int errnum;
     do{
             bytes_rx = recv(thread_func_args->thread_info.afd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
-            syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
+            //syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
             // syslog(LOG_DEBUG, "new_fd is %d", thread_func_args->thread_info.afd);       
             syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
             if (bytes_rx < 0)
@@ -432,7 +433,7 @@ void *threadfunc(void *args)
 
     while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
-        syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
+        //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
             errnum9 = errno;
@@ -557,13 +558,14 @@ int main(int argc, char *argv[])
 
     syslog(LOG_DEBUG, "listen pass");
 
+
+
+    //syslog(LOG_DEBUG, "Timer has been set");
+
+    //syslog(LOG_DEBUG, "server: waiting for connections.........\n");
+
+
     initTimer();
-
-    syslog(LOG_DEBUG, "Timer has been set");
-
-    syslog(LOG_DEBUG, "server: waiting for connections.........\n");
-
-    
     
     while(!sig){ 
         
