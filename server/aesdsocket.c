@@ -51,6 +51,7 @@ typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 struct thread_info_s{
@@ -173,10 +174,10 @@ void closeAll(int exit_flag)
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    //if(remove(recvfile) != 0)
-    //{
-      //  syslog(LOG_ERR, "File removal not successful");
-    //}
+    if(remove(recvfile) != 0)
+    {
+       syslog(LOG_ERR, "File removal not successful");
+    }
     pthread_mutex_destroy(&writeSocket);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
@@ -187,7 +188,7 @@ void closeAll(int exit_flag)
 void *threadfunc(void *args)
 {
     my_threads *thread_func_args = (my_threads *) args;
-    syslog(LOG_DEBUG, "I have entered this thread with threadID = %lu", thread_func_args->thread_info.threadid);
+    syslog(LOG_DEBUG, "Entered Thread: ID = %lu, AFD = %d", thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
     bool isPacketValid = false;
     ssize_t bytes_rx = 0;
     ssize_t bytes_read = 0;
@@ -206,34 +207,29 @@ void *threadfunc(void *args)
     }
 
     memset(my_buffer, 0, BUF_SIZE);
-
+    int errnum;
     do{
-            bytes_rx = recv(new_fd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
-            for (int i = 0; i < bytes_rx; i++)
-            {
-                syslog(LOG_DEBUG, "receiving: %c", my_buffer[i]);
-            }            
+            bytes_rx = recv(thread_func_args->thread_info.afd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
+            syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
+            // syslog(LOG_DEBUG, "new_fd is %d", thread_func_args->thread_info.afd);       
             syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
             if (bytes_rx < 0)
             {
+                errnum = errno;
                 free(my_buffer);
-                perror("server: recv");
-                syslog(LOG_ERR, "server: recv");
+                syslog(LOG_ERR, "server: recv, errno is %d", errnum);
+                syslog(LOG_ERR, "Error Msg: %s", strerror(errno));
                 closeAll(EXIT_FAILURE);
             }
             supplementBuf += bytes_rx; 
-            syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
+            //syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu, AFD: %d", supplementBuf, thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
             new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
             if (new_line != NULL)
             {
-                syslog(LOG_DEBUG, "yay, newline character found!");
-                // for (int i = 0; i < supplementBuf; i++)
-                // {
-                //     syslog(LOG_DEBUG, "%c", my_buffer[i]);
-                // }
+                //syslog(LOG_DEBUG, "yay, newline character found!");
                 isPacketValid = true;
                 supplementBuf = new_line - my_buffer + 1; 
-                syslog(LOG_DEBUG, "supplementBuf size with newline found is %ld with thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
+                //syslog(LOG_DEBUG, "supplementBuf size with newline found is %ld with thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
             }
 
             else
@@ -263,6 +259,7 @@ void *threadfunc(void *args)
             syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
             perror("pthread mutex_lock failed");
         }
+
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
         rc = pthread_mutex_unlock(&writeSocket);
@@ -314,7 +311,6 @@ void *threadfunc(void *args)
     }
 
    
-
     rc = pthread_mutex_lock(&writeSocket);
     if (rc != 0)
     {
@@ -328,25 +324,34 @@ void *threadfunc(void *args)
         perror("server: lseek");
         closeAll(EXIT_FAILURE);
     }
-    syslog(LOG_DEBUG, "lseek pass");
 
+    rc = pthread_mutex_unlock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+        perror("pthread mutex_unlock failed");
+    }
+
+
+    //syslog(LOG_DEBUG, "lseek pass");
+
+    int errnum9 = 0;
 
     while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
-        for(int i = 0; i < bytes_read; i++)
+        syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
+        if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
-            syslog(LOG_DEBUG, "send: %c",send_my_buffer[i]);
-        }
-        if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
-        {
+            errnum9 = errno;
             syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
-            syslog(LOG_ERR,"server: send");
-            rc = pthread_mutex_unlock(&writeSocket);
-            if (rc != 0)
-            {
-                syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-                perror("pthread mutex_unlock failed");
-            }
+            syslog(LOG_ERR, "server: send, errno is %d", errnum9);
+            syslog(LOG_ERR, "error string is %s", strerror(errno));
+            // rc = pthread_mutex_unlock(&writeSocket);
+            // if (rc != 0)
+            // {
+            //     syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+            //     perror("pthread mutex_unlock failed");
+            // }
             perror("server: send");
             closeAll(EXIT_FAILURE);
         }
@@ -358,18 +363,20 @@ void *threadfunc(void *args)
         }
     }
 
-    rc = pthread_mutex_unlock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-        perror("pthread mutex_unlock failed");
-    }
 
-    syslog(LOG_DEBUG, "_________________________________________________________");
     thread_func_args->thread_info.thread_complete_success = true;
-    close(new_fd);
+    // if (close(new_fd) == -1)
+    // {
+    //     syslog(LOG_ERR, "new_fd failed to close");
+    // }
+    // else 
+    // {
+    //     syslog(LOG_DEBUG, "new_fd: %d successfully closed.", thread_func_args->thread_info.afd);
+    // }
+
     syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
-    pthread_exit(NULL);
+    syslog(LOG_DEBUG, "_________________________________________________________");
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -486,7 +493,7 @@ int main(int argc, char *argv[])
             continue;
         }
         
-        syslog(LOG_DEBUG, "Connected + Accepted, new_fd is %d", new_fd);
+        //syslog(LOG_DEBUG, "Connected + Accepted, new_fd is %d", new_fd);
 
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
         //syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
@@ -500,7 +507,15 @@ int main(int argc, char *argv[])
             //should I be exiting everything here or just keep trying
         }
         
-        thread_data->thread_info.afd = new_fd;
+        thread_data->thread_info.afd = dup(new_fd);
+        if(thread_data->thread_info.afd == -1)
+        {
+            syslog(LOG_ERR, "Failed to duplicate file descriptor");
+            free(thread_data);
+            close(new_fd);
+            continue;
+        }
+        close(new_fd);
         thread_data->thread_info.thread_complete_success = false;
         strcpy(thread_data->thread_info.ip4, ip4);
 
@@ -517,14 +532,35 @@ int main(int argc, char *argv[])
 
         else 
         {
-            syslog(LOG_DEBUG, "pthread_created successfully");
-            syslog(LOG_DEBUG, "The threadID is %lu.", thread_data->thread_info.threadid);
+            syslog(LOG_DEBUG, "pthread_created successfully. The threadID is %lu. AFD: %d", thread_data->thread_info.threadid, thread_data->thread_info.afd);
         }
 
+
+        rc = pthread_mutex_lock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }        
         SLIST_INSERT_HEAD(&head, thread_data, nextThread);
+        rc = pthread_mutex_unlock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
+
         int join_rc;
         my_threads *datap = NULL;
         my_threads *temp = NULL;
+
+
+        rc = pthread_mutex_lock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }     
 
         SLIST_FOREACH_SAFE(datap, &head, nextThread, temp)
         {
@@ -544,8 +580,15 @@ int main(int argc, char *argv[])
             }
             else
             {
-                syslog(LOG_DEBUG, "I did not join on threadID = %lu", datap->thread_info.threadid);
+                //syslog(LOG_DEBUG, "I did not join on threadID = %lu", datap->thread_info.threadid);
             }
+        }
+
+        rc = pthread_mutex_unlock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
         }
     }
 
