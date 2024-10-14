@@ -50,6 +50,7 @@
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 
 
 struct thread_info_s{
@@ -76,9 +77,11 @@ bool daemon_en = false;
 int sockfd = -1;
 int new_fd = -1;
 int recvfile_fd = -1;
+static ssize_t total_size = 0;
 
 pid_t pid;
 const char *recvfile = "/var/tmp/aesdsocketdata";
+//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
 static void closeAll(int exit_flag);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
@@ -170,10 +173,10 @@ void closeAll(int exit_flag)
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    if(remove(recvfile) != 0)
-    {
-        syslog(LOG_ERR, "File removal not successful");
-    }
+    //if(remove(recvfile) != 0)
+    //{
+      //  syslog(LOG_ERR, "File removal not successful");
+    //}
     pthread_mutex_destroy(&writeSocket);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
@@ -186,12 +189,12 @@ void *threadfunc(void *args)
     my_threads *thread_func_args = (my_threads *) args;
     syslog(LOG_DEBUG, "I have entered this thread with threadID = %lu", thread_func_args->thread_info.threadid);
     bool isPacketValid = false;
-    ssize_t bytes_rx;
-    ssize_t bytes_read;
+    ssize_t bytes_rx = 0;
+    ssize_t bytes_read = 0;
     ssize_t supplementBuf = 0;
     ssize_t supplementSize = BUF_SIZE;
-    ssize_t nr;
-    int rc;
+    ssize_t nr = 0;
+    int rc = 0;
     char *new_line = NULL;
     char *my_buffer = (char *) malloc(BUF_SIZE);
     char *send_my_buffer = NULL;
@@ -205,8 +208,11 @@ void *threadfunc(void *args)
     memset(my_buffer, 0, BUF_SIZE);
 
     do{
-            
             bytes_rx = recv(new_fd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
+            for (int i = 0; i < bytes_rx; i++)
+            {
+                syslog(LOG_DEBUG, "receiving: %c", my_buffer[i]);
+            }            
             syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
             if (bytes_rx < 0)
             {
@@ -216,13 +222,18 @@ void *threadfunc(void *args)
                 closeAll(EXIT_FAILURE);
             }
             supplementBuf += bytes_rx; 
+            syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
             new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
             if (new_line != NULL)
             {
-                syslog(LOG_DEBUG, "YAY, slash n found");
+                syslog(LOG_DEBUG, "yay, newline character found!");
+                // for (int i = 0; i < supplementBuf; i++)
+                // {
+                //     syslog(LOG_DEBUG, "%c", my_buffer[i]);
+                // }
                 isPacketValid = true;
                 supplementBuf = new_line - my_buffer + 1; 
-                syslog(LOG_DEBUG, "supplementBuf size within slash found %ld", supplementBuf);
+                syslog(LOG_DEBUG, "supplementBuf size with newline found is %ld with thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
             }
 
             else
@@ -237,7 +248,7 @@ void *threadfunc(void *args)
                 memset(my_buffer+supplementBuf, 0 , supplementSize-supplementBuf);
             }
 
-    }while (isPacketValid == false);
+        }while (isPacketValid == false);
 
 
 
@@ -245,8 +256,6 @@ void *threadfunc(void *args)
     if(isPacketValid == true)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
-
-
 
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
@@ -263,7 +272,7 @@ void *threadfunc(void *args)
             perror("pthread mutex_unlock failed");
         }
 
-        syslog(LOG_DEBUG, "nr is %ld",nr);
+        syslog(LOG_DEBUG, "bytes written to recvfile is %ld",nr);
         if (nr != supplementBuf)
         {
             /*error*/
@@ -277,12 +286,27 @@ void *threadfunc(void *args)
 
     }
 
+    rc = pthread_mutex_lock(&size_val);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
+    total_size += supplementBuf;
+
+    rc = pthread_mutex_unlock(&size_val);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
 
     free(my_buffer);
     my_buffer = NULL;
 
 
-    send_my_buffer = (char *) malloc(supplementBuf);
+    send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
         syslog(LOG_ERR, "Failed to malloc sending buffer.");
@@ -307,8 +331,12 @@ void *threadfunc(void *args)
     syslog(LOG_DEBUG, "lseek pass");
 
 
-    while ((bytes_read = read(recvfile_fd, send_my_buffer, supplementBuf)) > 0) {
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
+        for(int i = 0; i < bytes_read; i++)
+        {
+            syslog(LOG_DEBUG, "send: %c",send_my_buffer[i]);
+        }
         if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
             syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
@@ -458,10 +486,10 @@ int main(int argc, char *argv[])
             continue;
         }
         
-        syslog(LOG_DEBUG, "CONNECTED, new_fd is %d", new_fd);
+        syslog(LOG_DEBUG, "Connected + Accepted, new_fd is %d", new_fd);
 
         inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
-        syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
+        //syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
 
         my_threads *thread_data = (my_threads *)malloc(sizeof(my_threads));
         if (thread_data == NULL)
@@ -472,8 +500,6 @@ int main(int argc, char *argv[])
             //should I be exiting everything here or just keep trying
         }
         
-        
-
         thread_data->thread_info.afd = new_fd;
         thread_data->thread_info.thread_complete_success = false;
         strcpy(thread_data->thread_info.ip4, ip4);
