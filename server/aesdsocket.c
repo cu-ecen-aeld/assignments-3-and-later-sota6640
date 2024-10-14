@@ -9,7 +9,7 @@
  * ****************************************************************************/
 /**
  * @file    aesdsocket.c
- * @brief	Assignment 5 Part 1. Socket based program
+ * @brief	Assignment 5,6 Part 1. Socket based program
  * @author  Sonal Tamrakar
  * @date    10-07-2024
  * @credit  Beej's Guide to Network Programming
@@ -37,6 +37,9 @@
 #include <signal.h>
 #include <linux/fs.h>
 #include <pthread.h>
+#include <sys/time.h>
+#include <time.h>
+#include <errno.h>
 //#include <sys/queue.h>
 #include "queue.h"
 
@@ -44,11 +47,13 @@
 //const char* port = "9000";
 
 //optional
-#define BACKLOG 10 // pending connections
+#define BACKLOG (10) // pending connections
 #define BUF_SIZE 1024
+#define TSTAMP_INTERVAL (10)
 
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
+static timer_t timerid;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -81,11 +86,13 @@ int recvfile_fd = -1;
 static ssize_t total_size = 0;
 
 pid_t pid;
-const char *recvfile = "/var/tmp/aesdsocketdata";
-//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
+//const char *recvfile = "/var/tmp/aesdsocketdata";
+const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
 static void closeAll(int exit_flag);
+static void initTimer(void);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
+static void timer_handler(int signal_number);
 void *threadfunc(void *arg);
 
 static void signal_handler (int signal_number)
@@ -97,6 +104,47 @@ static void signal_handler (int signal_number)
     }
 }
 
+static void timer_handler(int signal_number)
+{
+    int rc;
+    ssize_t nr;
+    ssize_t strf_ret;
+    time_t now;
+    struct tm *ttime;
+    char curr_tstamp[50];
+    time(&now);
+    ttime = localtime(&now);
+   
+
+    strf_ret = strftime(curr_tstamp, sizeof(curr_tstamp), "timestamp:%Y %b %d %H:%M:%S\n", ttime);
+
+    if (!strf_ret)
+    {
+        syslog(LOG_ERR, "strftime error, receiving 0 bytes");
+    }
+
+    rc = pthread_mutex_lock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
+    nr = write(recvfile_fd, curr_tstamp, strf_ret);
+
+    rc = pthread_mutex_unlock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+        perror("pthread mutex_unlock failed");
+    }
+
+    if(nr != strf_ret)
+    {
+        syslog(LOG_DEBUG, "Inconsistent bytes written");
+    }
+    
+}
 
 static void init_sigHandler(void)
 {
@@ -167,17 +215,62 @@ static int create_daemon()
         return 0;
 }
 
+static void initTimer(void)
+{
+    struct sigaction sigt;
+    struct sigevent sev;
+    struct itimerspec mytime;
+
+    memset(&sigt, 0, sizeof(struct sigaction));
+    sigt.sa_handler = timer_handler;
+    if( sigaction(SIGALRM, &sigt, NULL) != 0)
+    {
+        syslog(LOG_ERR, "Error %d (%s) registering for SIGALRM", errno, strerror(errno));
+        perror("sigalrm: fail");
+        closeAll(EXIT_FAILURE);
+    }
+
+    sev.sigev_notify = SIGEV_SIGNAL;
+    //sev.sigev_notify_function = &timer_handler;
+    sev.sigev_signo = SIGALRM;
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == -1) 
+    {
+        perror("initTimer: timer_create");
+        syslog(LOG_ERR, "Error creating timer: %s", strerror(errno));
+        return;
+    }
+
+    mytime.it_value.tv_sec = TSTAMP_INTERVAL;
+    mytime.it_value.tv_nsec = 0;
+    mytime.it_interval.tv_sec = TSTAMP_INTERVAL;
+    mytime.it_interval.tv_nsec = 0;
+
+
+
+    if(timer_settime(timerid, 0, &mytime, NULL) == -1)
+    {
+        perror("initTimer: timer_settime");
+        syslog(LOG_ERR, "Timer couldn't be started: %s", strerror(errno));
+    }
+
+
+
+    return;
+}
 
 void closeAll(int exit_flag)
 {
+    //int rc;
     syslog(LOG_DEBUG, "PERFORMING CLEANUP.");
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    if(remove(recvfile) != 0)
-    {
-       syslog(LOG_ERR, "File removal not successful");
-    }
+    // if(remove(recvfile) != 0)
+    // {
+    //    syslog(LOG_ERR, "File removal not successful");
+    // }
+
+    timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
@@ -346,12 +439,6 @@ void *threadfunc(void *args)
             syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
             syslog(LOG_ERR, "server: send, errno is %d", errnum9);
             syslog(LOG_ERR, "error string is %s", strerror(errno));
-            // rc = pthread_mutex_unlock(&writeSocket);
-            // if (rc != 0)
-            // {
-            //     syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-            //     perror("pthread mutex_unlock failed");
-            // }
             perror("server: send");
             closeAll(EXIT_FAILURE);
         }
@@ -365,15 +452,6 @@ void *threadfunc(void *args)
 
 
     thread_func_args->thread_info.thread_complete_success = true;
-    // if (close(new_fd) == -1)
-    // {
-    //     syslog(LOG_ERR, "new_fd failed to close");
-    // }
-    // else 
-    // {
-    //     syslog(LOG_DEBUG, "new_fd: %d successfully closed.", thread_func_args->thread_info.afd);
-    // }
-
     syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
     syslog(LOG_DEBUG, "_________________________________________________________");
     return 0;
@@ -478,6 +556,10 @@ int main(int argc, char *argv[])
     }
 
     syslog(LOG_DEBUG, "listen pass");
+
+    initTimer();
+
+    syslog(LOG_DEBUG, "Timer has been set");
 
     syslog(LOG_DEBUG, "server: waiting for connections.........\n");
 

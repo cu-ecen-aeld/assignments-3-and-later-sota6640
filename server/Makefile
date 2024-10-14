@@ -32,7 +32,7 @@ clean:
 	-rm -f aesdsocket
 
 aesdsocket: ${OBJS}
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS) -pthread
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS) -pthread -lrt
 
 depend:
 
