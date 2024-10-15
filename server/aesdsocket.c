@@ -479,7 +479,7 @@ void *threadfunc(void *args)
 
     //printf("total size here is %ld, \n", total_size);
     syslog(LOG_DEBUG, "total size here is %ld", remaining);
-    while (remaining > 0 && (bytes_read = read(recvfile_fd, send_my_buffer, (remaining < BUF_SIZE) ? remaining : BUF_SIZE)) > 0) {
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, remaining)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
@@ -497,7 +497,6 @@ void *threadfunc(void *args)
             free(send_my_buffer);
             send_my_buffer = NULL;
         }
-        remaining -= bytes_read;
     }
     
 
@@ -754,12 +753,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // if(SLIST_EMPTY(&head))
-    // {
-    //     printf("List now empty.\n");
-    // }
-    // else { printf("List still populated.\n");
-    // }
     syslog(LOG_DEBUG, "Do I reach here?");
     //printf("Do I reach here?\n");
     closeAll(EXIT_SUCCESS);
