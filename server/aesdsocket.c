@@ -48,22 +48,20 @@
 
 //optional
 #define BACKLOG (10) // pending connections
-#define BUF_SIZE 1024
+#define BUF_SIZE 1500
 #define TSTAMP_INTERVAL (10)
 #define TIMESTAMP_INTERVAL (10)
 
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
-//static timer_t timerid;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
-//pthread_mutex_t timer_mutex;
+
 
 
 struct thread_info_s{
     pthread_t threadid;
-    //int write_file_fd;
     int afd; //accepted fd psot accept() connection.
     bool thread_complete_success;
     char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
@@ -89,8 +87,8 @@ int recvfile_fd = -1;
 static ssize_t total_size = 0;
 
 pid_t pid;
-//const char *recvfile = "/var/tmp/aesdsocketdata";
-const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
+const char *recvfile = "/var/tmp/aesdsocketdata";
+//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
 static void closeAll(int exit_flag);
 static void initTimer(void);
 static void init_sigHandler(void);
@@ -179,26 +177,13 @@ static int create_daemon()
 
 static void initTimer(void)
 {
-    //pthread_t timertid;
-    //my_threads *timer_thread = (my_threads *)malloc(sizeof(my_threads));
-    //if (timer_thread == NULL)
-    //{
-      //  syslog(LOG_ERR, "server: timer thread allocation");
-       // perror("server: timer thread allocation");
-        //should I be exiting everything here or just keep trying
-    //}
-    //else
-    //{
-      //  timer_thread->thread_info.thread_complete_success = false;
-        int timer_rc;
-        pthread_t timertid;
-        if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, NULL)) != 0)
-        {
-            syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
-            perror("Failed to pthread_create() timer_thread");
-            //free(timer_thread);
-        }
-    //}
+    int timer_rc;
+    pthread_t timertid;
+    if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, NULL)) != 0)
+    {
+        syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
+        perror("Failed to pthread_create() timer_thread");
+    }
     syslog(LOG_DEBUG, "Timer thread created successfully");
     return;
 }
@@ -255,7 +240,7 @@ void *threadtimerfunc(void *args)
         ts.tv_sec += 10; // ts.tv_sec = 525;
 
         syslog(LOG_DEBUG, "Starting sleep at %ld\n", start);
-        printf("Starting sleep at %ld", start);
+        printf("Starting sleep at %ld\n", start);
 
         nanosleep_rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
         if (nanosleep_rc != 0)
@@ -473,17 +458,33 @@ void *threadfunc(void *args)
     }
 
 
-    //syslog(LOG_DEBUG, "lseek pass");
+    rc = pthread_mutex_lock(&size_val);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
+    int temp_total_size = total_size;
+
+    rc = pthread_mutex_unlock(&size_val);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
 
     int errnum9 = 0;
 
-    while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
+    printf("total size here is %ld\n", total_size);
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, temp_total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
             errnum9 = errno;
-            syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
+            syslog(LOG_DEBUG,"HERE");
             syslog(LOG_ERR, "server: send, errno is %d", errnum9);
             syslog(LOG_ERR, "error string is %s", strerror(errno));
             perror("server: send");
@@ -612,7 +613,8 @@ int main(int argc, char *argv[])
 
 
     initTimer();
-    //initTimer2();
+
+    printf("Timer thread has been set\n");
     
     while(!sig){ 
         
@@ -757,6 +759,7 @@ int main(int argc, char *argv[])
     else { printf("List still populated.\n");
     }
     syslog(LOG_DEBUG, "Do I reach here?");
+    printf("Do I reach here?\n");
     closeAll(EXIT_SUCCESS);
     return 0;
 }
