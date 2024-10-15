@@ -54,7 +54,7 @@
 
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
-static timer_t timerid;
+//static timer_t timerid;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -179,24 +179,26 @@ static int create_daemon()
 
 static void initTimer(void)
 {
-    pthread_t timertid;
-    my_threads *timer_thread = (my_threads *)malloc(sizeof(my_threads));
-    if (timer_thread == NULL)
-    {
-        syslog(LOG_ERR, "server: timer thread allocation");
-        perror("server: timer thread allocation");
+    //pthread_t timertid;
+    //my_threads *timer_thread = (my_threads *)malloc(sizeof(my_threads));
+    //if (timer_thread == NULL)
+    //{
+      //  syslog(LOG_ERR, "server: timer thread allocation");
+       // perror("server: timer thread allocation");
         //should I be exiting everything here or just keep trying
-    }
-    else
-    {
+    //}
+    //else
+    //{
+      //  timer_thread->thread_info.thread_complete_success = false;
         int timer_rc;
-        if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, (void*) &(timer_thread->thread_info))) != 0)
+        pthread_t timertid;
+        if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, NULL)) != 0)
         {
             syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
             perror("Failed to pthread_create() timer_thread");
-            free(timer_thread);
+            //free(timer_thread);
         }
-    }
+    //}
     syslog(LOG_DEBUG, "Timer thread created successfully");
     return;
 }
@@ -214,10 +216,11 @@ void closeAll(int exit_flag)
     {
        syslog(LOG_ERR, "File removal not successful");
     }
-
-    timer_delete(timerid);
+    syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
+    //timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
     pthread_mutex_destroy(&ll_lock);
+    syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
     pthread_mutex_destroy(&size_val);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
@@ -227,6 +230,11 @@ void closeAll(int exit_flag)
 
 void *threadtimerfunc(void *args)
 {
+    //my_threads *thread_func_args = (my_threads *) args;
+    if (args != NULL)
+    {
+        printf("args passed is not NULL");
+    }
     time_t now;
     struct tm *tm;
     char timestamp[100];
@@ -235,18 +243,31 @@ void *threadtimerfunc(void *args)
     ts.tv_nsec = 0;
     time_t start, end;
     start = time(NULL);
+    int nanosleep_rc;
     int rc;
 
     while(!sig)
     {
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) // 515 , ts.tv_sec = 515;
+        {
+            printf("clock_gettime failed.\n");
+        }
+        ts.tv_sec += 10; // ts.tv_sec = 525;
 
-        syslog(LOG_DEBUG, "Starting sleep at %ld", start);
+        syslog(LOG_DEBUG, "Starting sleep at %ld\n", start);
+        printf("Starting sleep at %ld", start);
 
-        clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
+        nanosleep_rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+        if (nanosleep_rc != 0)
+        {
+            printf("nanosleep failed.\n");
+        }
+        
+        printf("nanosleep_rc is %d\n", nanosleep_rc);
 
         end = time(NULL);
         syslog(LOG_DEBUG, "Ending sleep at %ld, slept for %ld seconds", end, end-start);
-
+        printf("Ending sleep at %ld, slept for %ld seconds\n", end, end-start);
 
         now = time(NULL);
 
@@ -300,6 +321,8 @@ void *threadtimerfunc(void *args)
             perror("pthread mutex_unlock failed");
         }
     }
+    printf("Thread should be completed here.\n");
+    //thread_func_args->thread_info.thread_complete_success = true;
     return NULL;
 }
 void *threadfunc(void *args)
@@ -700,6 +723,39 @@ int main(int argc, char *argv[])
         }
     }
 
+    my_threads *datap1 = NULL;
+    my_threads *temp1 = NULL;
+    int join_rc1;
+
+    if(SLIST_EMPTY(&head))
+    {
+        printf("The list is empty\n");
+    }
+    else
+    {
+        printf("\nThe list is not empty. About to join every threads\n");
+        SLIST_FOREACH_SAFE(datap1, &head, nextThread, temp1)
+        {
+                join_rc1 = pthread_join(datap1->thread_info.threadid, NULL);
+                if(join_rc1 != 0) 
+                {
+                    syslog(LOG_ERR, "Failed to pthread_join(), error was %d", join_rc1);
+                    perror("Failed to pthread_join()");
+                    continue;
+                }
+                syslog(LOG_DEBUG, "Joined thread %lu", datap1->thread_info.threadid);
+                SLIST_REMOVE(&head, datap1, slist_data_s, nextThread);
+                free(datap1);
+                datap1 = NULL;
+        }
+    }
+
+    if(SLIST_EMPTY(&head))
+    {
+        printf("List now empty.\n");
+    }
+    else { printf("List still populated.\n");
+    }
     syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
     return 0;
