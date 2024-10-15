@@ -240,7 +240,7 @@ void *threadtimerfunc(void *args)
         ts.tv_sec += 10; // ts.tv_sec = 525;
 
         syslog(LOG_DEBUG, "Starting sleep at %ld\n", start);
-        printf("Starting sleep at %ld\n", start);
+        //printf("Starting sleep at %ld\n", start);
 
         nanosleep_rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
         if (nanosleep_rc != 0)
@@ -248,11 +248,11 @@ void *threadtimerfunc(void *args)
             printf("nanosleep failed.\n");
         }
         
-        printf("nanosleep_rc is %d\n", nanosleep_rc);
+        //printf("nanosleep_rc is %d\n", nanosleep_rc);
 
         end = time(NULL);
         syslog(LOG_DEBUG, "Ending sleep at %ld, slept for %ld seconds", end, end-start);
-        printf("Ending sleep at %ld, slept for %ld seconds\n", end, end-start);
+        //printf("Ending sleep at %ld, slept for %ld seconds\n", end, end-start);
 
         now = time(NULL);
 
@@ -465,7 +465,7 @@ void *threadfunc(void *args)
         perror("pthread mutex_lock failed");
     }
 
-    int temp_total_size = total_size;
+    ssize_t remaining = total_size;
 
     rc = pthread_mutex_unlock(&size_val);
     if (rc != 0)
@@ -477,8 +477,9 @@ void *threadfunc(void *args)
 
     int errnum9 = 0;
 
-    printf("total size here is %ld\n", total_size);
-    while ((bytes_read = read(recvfile_fd, send_my_buffer, temp_total_size)) > 0) {
+    //printf("total size here is %ld, \n", total_size);
+    syslog(LOG_DEBUG, "total size here is %ld", remaining);
+    while (remaining > 0 && (bytes_read = read(recvfile_fd, send_my_buffer, (remaining < BUF_SIZE) ? remaining : BUF_SIZE)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
@@ -496,8 +497,9 @@ void *threadfunc(void *args)
             free(send_my_buffer);
             send_my_buffer = NULL;
         }
+        remaining -= bytes_read;
     }
-
+    
 
     thread_func_args->thread_info.thread_complete_success = true;
     syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
@@ -752,14 +754,14 @@ int main(int argc, char *argv[])
         }
     }
 
-    if(SLIST_EMPTY(&head))
-    {
-        printf("List now empty.\n");
-    }
-    else { printf("List still populated.\n");
-    }
+    // if(SLIST_EMPTY(&head))
+    // {
+    //     printf("List now empty.\n");
+    // }
+    // else { printf("List still populated.\n");
+    // }
     syslog(LOG_DEBUG, "Do I reach here?");
-    printf("Do I reach here?\n");
+    //printf("Do I reach here?\n");
     closeAll(EXIT_SUCCESS);
     return 0;
 }
