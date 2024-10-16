@@ -306,7 +306,7 @@ void *threadtimerfunc(void *args)
             perror("pthread mutex_unlock failed");
         }
     }
-    printf("Thread should be completed here.\n");
+    //printf("Thread should be completed here.\n");
     //thread_func_args->thread_info.thread_complete_success = true;
     return NULL;
 }
@@ -618,7 +618,7 @@ int main(int argc, char *argv[])
 
     initTimer();
 
-    printf("Timer thread has been set\n");
+    //printf("Timer thread has been set\n");
     
     while(!sig){ 
         
@@ -739,7 +739,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        printf("\nThe list is not empty. About to join every threads\n");
+        //printf("\nThe list is not empty. About to join every threads\n");
         SLIST_FOREACH_SAFE(datap1, &head, nextThread, temp1)
         {
                 join_rc1 = pthread_join(datap1->thread_info.threadid, NULL);
