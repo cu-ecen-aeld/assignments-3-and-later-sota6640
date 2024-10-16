@@ -359,12 +359,14 @@ void *threadfunc(void *args)
 
             else
             {
-                my_buffer = realloc(my_buffer, supplementSize+BUF_SIZE);
-                if(my_buffer == NULL)
+                char* temp_buffer = realloc(my_buffer, supplementSize+BUF_SIZE);
+                if(temp_buffer == NULL)
                 {
                     syslog(LOG_ERR, "Failed to realloc.");
+                    free(my_buffer); // free previously allocated buffer
                     closeAll(EXIT_FAILURE);
                 }
+                my_buffer=temp_buffer;
                 supplementSize += BUF_SIZE;
                 memset(my_buffer+supplementBuf, 0 , supplementSize-supplementBuf);
             }
@@ -428,12 +430,7 @@ void *threadfunc(void *args)
     my_buffer = NULL;
 
 
-    send_my_buffer = (char *) malloc(BUF_SIZE);
-    if (send_my_buffer == NULL)
-    {
-        syslog(LOG_ERR, "Failed to malloc sending buffer.");
-        closeAll(EXIT_FAILURE);
-    }
+
 
    
     rc = pthread_mutex_lock(&writeSocket);
@@ -474,6 +471,12 @@ void *threadfunc(void *args)
         perror("pthread mutex_lock failed");
     }
 
+    send_my_buffer = (char *) malloc(BUF_SIZE);
+    if (send_my_buffer == NULL)
+    {
+        syslog(LOG_ERR, "Failed to malloc sending buffer.");
+        closeAll(EXIT_FAILURE);
+    }
 
     int errnum9 = 0;
 
@@ -494,12 +497,12 @@ void *threadfunc(void *args)
         else
         {
             syslog(LOG_DEBUG, "send passed");
-            free(send_my_buffer);
-            send_my_buffer = NULL;
         }
     }
-    
 
+
+    free(send_my_buffer);
+    send_my_buffer = NULL;
     thread_func_args->thread_info.thread_complete_success = true;
     syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
     syslog(LOG_DEBUG, "_________________________________________________________");
