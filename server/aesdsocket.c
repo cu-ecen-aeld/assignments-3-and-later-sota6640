@@ -55,8 +55,7 @@
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
-
+pthread_t timertid;
 
 
 struct thread_info_s{
@@ -177,7 +176,7 @@ static int create_daemon()
 static void initTimer(void)
 {
     int timer_rc;
-    pthread_t timertid;
+    
     if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, NULL)) != 0)
     {
         syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
@@ -203,7 +202,6 @@ void closeAll(int exit_flag)
     syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
     //timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
-    pthread_mutex_destroy(&ll_lock);
     syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
@@ -225,6 +223,7 @@ void *threadtimerfunc(void *args)
     ts.tv_sec = 10;
     ts.tv_nsec = 0;
     time_t start, end;
+    ssize_t nr = 0;
     start = time(NULL);
     int nanosleep_rc;
     int rc;
@@ -269,17 +268,9 @@ void *threadtimerfunc(void *args)
             syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
             perror("pthread mutex_lock failed");
         }
-        if(write(recvfile_fd, timestamp, strlen(timestamp))==-1)
-        {
-            syslog(LOG_ERR, "write failed to timestamp");
-            rc = pthread_mutex_unlock(&writeSocket);
-            if (rc != 0)
-            {
-                syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-                perror("pthread mutex_unlock failed");
-            }
-            continue;
-        }
+         
+        nr = write(recvfile_fd, timestamp, strlen(timestamp));
+
         total_size += strlen(timestamp);
 
         rc = pthread_mutex_unlock(&writeSocket);
@@ -288,6 +279,15 @@ void *threadtimerfunc(void *args)
             syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
             perror("pthread mutex_unlock failed");
         }
+
+        if(nr != strlen(timestamp))
+        {
+            int err1 = errno;
+            syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
+            syslog(LOG_ERR, "error string is %s", strerror(errno));   
+        }
+
+
     }
     //printf("Thread should be completed here.\n");
     //thread_func_args->thread_info.thread_complete_success = true;
@@ -623,31 +623,12 @@ int main(int argc, char *argv[])
         }
 
 
-        rc = pthread_mutex_lock(&ll_lock);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
-            perror("pthread mutex_lock failed");
-        }        
+     
         SLIST_INSERT_HEAD(&head, thread_data, nextThread);
-        rc = pthread_mutex_unlock(&ll_lock);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
-            perror("pthread mutex_lock failed");
-        }
-
         int join_rc;
         my_threads *datap = NULL;
         my_threads *temp = NULL;
-
-
-        rc = pthread_mutex_lock(&ll_lock);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
-            perror("pthread mutex_lock failed");
-        }     
+   
 
         SLIST_FOREACH_SAFE(datap, &head, nextThread, temp)
         {
@@ -669,13 +650,6 @@ int main(int argc, char *argv[])
             {
                 //syslog(LOG_DEBUG, "I did not join on threadID = %lu", datap->thread_info.threadid);
             }
-        }
-
-        rc = pthread_mutex_unlock(&ll_lock);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
-            perror("pthread mutex_lock failed");
         }
     }
 
@@ -706,6 +680,12 @@ int main(int argc, char *argv[])
         }
     }
 
+    pthread_cancel(timertid);
+    join_rc1 = pthread_join(timertid, NULL);
+    if (join_rc1 != 0)
+    {
+        syslog(LOG_ERR, "Timer thread failed to join.");
+    }
     syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
     return 0;
