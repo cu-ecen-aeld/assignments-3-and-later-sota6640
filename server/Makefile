@@ -5,36 +5,24 @@
 # https://math.uaa.alaska.edu/~ssiewert/a335_code/EXAMPLES/POSIX/
 # Date: 10/06/2024
 
-INCLUDE_FLAGS= -Wall -Werror 
-LIB_DIRS = 
 
+CC ?= $(CROSS_COMPILE)gcc
+CFLAGS ?= -g -Wall -Werror
+LDFLAGS ?= -pthread -lrt
+TARGET ?= aesdsocket
+CFILES ?= aesdsocket.c
+OBJS = $(CFILES:.c=.o)
 
-CC = gcc
+all: $(TARGET)
 
+default: all
 
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-CDEFS=
-CFLAGS= -O0 -g $(INCLUDE_FLAGS) $(CDEFS)
-LIBS=
-
-PRODUCT=aesdsocket
-
-HFILES= 
-CFILES=aesdsocket.c
-
-SRCS= ${HFILES} ${CFILES}
-OBJS= ${CFILES:.c=.o}
-
-all:	${PRODUCT}
+aesdsocket: $(OBJS)
+	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
 clean:
-	-rm -f *.o *.d
-	-rm -f aesdsocket
-
-aesdsocket: ${OBJS}
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
-
-depend:
-
-.c.o:
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $<
+	rm -f *.o *.d
+	rm -f aesdsocket

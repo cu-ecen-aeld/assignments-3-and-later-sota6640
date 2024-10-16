@@ -9,7 +9,7 @@
  * ****************************************************************************/
 /**
  * @file    aesdsocket.c
- * @brief	Assignment 5 Part 1. Socket based program
+ * @brief	Assignment 5,6 Part 1. Socket based program
  * @author  Sonal Tamrakar
  * @date    10-07-2024
  * @credit  Beej's Guide to Network Programming
@@ -36,31 +36,98 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <linux/fs.h>
+#include <pthread.h>
+#include <sys/time.h>
+#include <time.h>
+#include <errno.h>
+//#include <sys/queue.h>
+#include "queue.h"
 
 #define PORT "9000" // the port users will be connecting to 
 //const char* port = "9000";
 
 //optional
-#define BACKLOG 10 // pending connections
-#define BUF_SIZE 1024
+#define BACKLOG (10) // pending connections
+#define BUF_SIZE 1500
+#define TSTAMP_INTERVAL (10)
+#define TIMESTAMP_INTERVAL (10)
+
+typedef struct thread_info_s thread_info_t;
+typedef struct slist_data_s my_threads;
+pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
-bool caught_sigalarm = false;
+
+struct thread_info_s{
+    pthread_t threadid;
+    int afd; //accepted fd psot accept() connection.
+    bool thread_complete_success;
+    char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
+};
+
+struct slist_data_s {
+
+    thread_info_t thread_info; 
+    SLIST_ENTRY(slist_data_s) nextThread;
+};
+
+SLIST_HEAD(slisthead, slist_data_s) head;
+
+
+
+
+sig_atomic_t sig = 0;
 bool daemon_en = false;
 
-int sockfd , new_fd, recvfile_fd;
+int sockfd = -1;
+int new_fd = -1;
+int recvfile_fd = -1;
+static ssize_t total_size = 0;
+
 pid_t pid;
 const char *recvfile = "/var/tmp/aesdsocketdata";
-void closeAll();
+//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
+static void closeAll(int exit_flag);
+static void initTimer(void);
+static void init_sigHandler(void);
+static void signal_handler(int signal_number);
+void *threadfunc(void *arg);
+void *threadtimerfunc(void *arg);
+void timer_handler(int signo);
 
-static void signal_handler ( int signal_number )
+static void signal_handler (int signal_number)
 {
-    if ( signal_number == SIGINT || signal_number == SIGTERM )
+    if (signal_number == SIGINT || signal_number == SIGTERM)
     {
         syslog(LOG_DEBUG, "Caught signal, exiting");
-        caught_sigalarm = true;
-        closeAll();
+        sig = 1;
     }
+}
+
+static void init_sigHandler(void)
+{
+    struct sigaction sig1;
+    memset(&sig1, 0, sizeof(struct sigaction));
+    sig1.sa_handler = signal_handler;
+    if( sigaction(SIGINT, &sig1, NULL) != 0)
+    {
+        syslog(LOG_ERR, "Error %d (%s) registering for SIGINT", errno, strerror(errno));
+        perror("sigint: fail");
+        closeAll(EXIT_FAILURE);
+    }
+
+    struct sigaction sig2;
+    memset(&sig2, 0, sizeof(struct sigaction));
+    sig2.sa_handler = signal_handler;
+    if( sigaction(SIGTERM, &sig2, NULL) != 0)
+    {
+        syslog(LOG_ERR, "Error %d (%s) registering for SIGTERM", errno, strerror(errno));
+        perror("sigterm: fail");
+        closeAll(EXIT_FAILURE);
+    }
+
+    return;
 }
 
 
@@ -107,18 +174,289 @@ static int create_daemon()
         return 0;
 }
 
-
-void closeAll()
+static void initTimer(void)
 {
+    int timer_rc;
+    pthread_t timertid;
+    if((timer_rc = pthread_create(&timertid, NULL, threadtimerfunc, NULL)) != 0)
+    {
+        syslog(LOG_ERR, "Failed to pthread_create() timer_thread, error was %d", timer_rc);
+        perror("Failed to pthread_create() timer_thread");
+    }
+    syslog(LOG_DEBUG, "Timer thread created successfully");
+    return;
+}
+
+
+
+void closeAll(int exit_flag)
+{
+    //int rc;
     syslog(LOG_DEBUG, "PERFORMING CLEANUP.");
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
+    if(recvfile_fd != -1) close(recvfile_fd);
     if(remove(recvfile) != 0)
     {
-        syslog(LOG_ERR, "File removal not successful");
+       syslog(LOG_ERR, "File removal not successful");
     }
-    closelog();
+    syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
+    //timer_delete(timerid);
+    pthread_mutex_destroy(&writeSocket);
+    pthread_mutex_destroy(&ll_lock);
+    syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
+    closelog();
+    exit(exit_flag);
+}
+
+
+void *threadtimerfunc(void *args)
+{
+    //my_threads *thread_func_args = (my_threads *) args;
+    if (args != NULL)
+    {
+        printf("args passed is not NULL");
+    }
+    time_t now;
+    struct tm *tm;
+    char timestamp[100];
+    struct timespec ts;
+    ts.tv_sec = 10;
+    ts.tv_nsec = 0;
+    time_t start, end;
+    start = time(NULL);
+    int nanosleep_rc;
+    int rc;
+
+    while(!sig)
+    {
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) // 515 , ts.tv_sec = 515;
+        {
+            printf("clock_gettime failed.\n");
+        }
+        ts.tv_sec += 10; // ts.tv_sec = 525;
+
+        syslog(LOG_DEBUG, "Starting sleep at %ld\n", start);
+        //printf("Starting sleep at %ld\n", start);
+
+        nanosleep_rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+        if (nanosleep_rc != 0)
+        {
+            printf("nanosleep failed.\n");
+        }
+        
+        //printf("nanosleep_rc is %d\n", nanosleep_rc);
+
+        end = time(NULL);
+        syslog(LOG_DEBUG, "Ending sleep at %ld, slept for %ld seconds", end, end-start);
+        //printf("Ending sleep at %ld, slept for %ld seconds\n", end, end-start);
+
+        now = time(NULL);
+
+        tm = localtime(&now);
+        
+
+        if(strftime(timestamp, sizeof(timestamp), "timestamp:%Y-%m-%d %H:%M:%S\n", tm)==0)
+        {
+            syslog(LOG_ERR,"strftime failed");
+            continue;
+        }
+
+        rc = pthread_mutex_lock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
+        if(write(recvfile_fd, timestamp, strlen(timestamp))==-1)
+        {
+            syslog(LOG_ERR, "write failed to timestamp");
+            rc = pthread_mutex_unlock(&writeSocket);
+            if (rc != 0)
+            {
+                syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+                perror("pthread mutex_unlock failed");
+            }
+            continue;
+        }
+        total_size += strlen(timestamp);
+
+        rc = pthread_mutex_unlock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+            perror("pthread mutex_unlock failed");
+        }
+    }
+    //printf("Thread should be completed here.\n");
+    //thread_func_args->thread_info.thread_complete_success = true;
+    return NULL;
+}
+void *threadfunc(void *args)
+{
+    my_threads *thread_func_args = (my_threads *) args;
+    syslog(LOG_DEBUG, "Entered Thread: ID = %lu, AFD = %d", thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
+    bool isPacketValid = false;
+    ssize_t bytes_rx = 0;
+    ssize_t bytes_read = 0;
+    ssize_t supplementBuf = 0;
+    ssize_t supplementSize = BUF_SIZE;
+    ssize_t nr = 0;
+    int rc = 0;
+    char *new_line = NULL;
+    char *my_buffer = (char *) malloc(BUF_SIZE);
+    char *send_my_buffer = NULL;
+
+    if(my_buffer == NULL)
+    {
+        syslog(LOG_ERR, "Failed to malloc.");
+        closeAll(EXIT_FAILURE);
+    }
+
+    memset(my_buffer, 0, BUF_SIZE);
+    int errnum;
+    do{
+            bytes_rx = recv(thread_func_args->thread_info.afd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
+            //syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
+            // syslog(LOG_DEBUG, "new_fd is %d", thread_func_args->thread_info.afd);       
+            syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
+            if (bytes_rx < 0)
+            {
+                errnum = errno;
+                free(my_buffer);
+                syslog(LOG_ERR, "server: recv, errno is %d", errnum);
+                syslog(LOG_ERR, "Error Msg: %s", strerror(errno));
+                closeAll(EXIT_FAILURE);
+            }
+            supplementBuf += bytes_rx; 
+            //syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu, AFD: %d", supplementBuf, thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
+            new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
+            if (new_line != NULL)
+            {
+                //syslog(LOG_DEBUG, "yay, newline character found!");
+                isPacketValid = true;
+                supplementBuf = new_line - my_buffer + 1; 
+                //syslog(LOG_DEBUG, "supplementBuf size with newline found is %ld with thread ID : %lu", supplementBuf, thread_func_args->thread_info.threadid);
+            }
+
+            else
+            {
+                char* temp_buffer = realloc(my_buffer, supplementSize+BUF_SIZE);
+                if(temp_buffer == NULL)
+                {
+                    syslog(LOG_ERR, "Failed to realloc.");
+                    free(my_buffer); // free previously allocated buffer
+                    closeAll(EXIT_FAILURE);
+                }
+                my_buffer=temp_buffer;
+                supplementSize += BUF_SIZE;
+                memset(my_buffer+supplementBuf, 0 , supplementSize-supplementBuf);
+            }
+
+        }while (isPacketValid == false);
+
+
+
+    //new line character has been found
+    if(isPacketValid == true)
+    {   
+        syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
+
+        rc = pthread_mutex_lock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
+
+        nr = write(recvfile_fd, my_buffer, supplementBuf);
+
+        total_size += supplementBuf;
+
+        rc = pthread_mutex_unlock(&writeSocket);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+            perror("pthread mutex_unlock failed");
+        }
+
+        syslog(LOG_DEBUG, "bytes written to recvfile is %ld",nr);
+        if (nr != supplementBuf)
+        {
+            /*error*/
+            int err1 = errno;
+            syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
+            syslog(LOG_ERR, "error string is %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+
+        syslog(LOG_DEBUG, "Write completed to recvfile_fd");
+
+    }
+
+
+    free(my_buffer);
+    my_buffer = NULL;
+
+
+    rc = pthread_mutex_lock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
+    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
+    {
+        syslog(LOG_ERR, "server: lseek");
+        perror("server: lseek");
+        closeAll(EXIT_FAILURE);
+    }
+
+    send_my_buffer = (char *) malloc(BUF_SIZE);
+    if (send_my_buffer == NULL)
+    {
+        syslog(LOG_ERR, "Failed to malloc sending buffer.");
+        closeAll(EXIT_FAILURE);
+    }
+
+    int errnum9 = 0;
+
+    //printf("total size here is %ld, \n", total_size);
+    syslog(LOG_DEBUG, "total size here is %ld", total_size);
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
+        syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
+        //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
+        if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
+        {
+            errnum9 = errno;
+            syslog(LOG_DEBUG,"HERE");
+            syslog(LOG_ERR, "server: send, errno is %d", errnum9);
+            syslog(LOG_ERR, "error string is %s", strerror(errno));
+            perror("server: send");
+            closeAll(EXIT_FAILURE);
+        }
+        else
+        {
+            syslog(LOG_DEBUG, "send passed");
+        }
+    }
+
+    rc = pthread_mutex_unlock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+        perror("pthread mutex_unlock failed");
+    }
+
+
+    free(send_my_buffer);
+    send_my_buffer = NULL;
+    thread_func_args->thread_info.thread_complete_success = true;
+    syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
+    syslog(LOG_DEBUG, "_________________________________________________________");
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -129,48 +467,17 @@ int main(int argc, char *argv[])
     syslog(LOG_DEBUG, "__________________________./full-test.sh________________________");
 
     int                             status;
-    // int                             sockfd, new_fd;
-    // char                            buf[BUF_SIZE];
-    // socklen_t                       sin_size;
-    // ssize_t                         nread;
     socklen_t                       peer_addrlen;
     struct addrinfo                 hints;
     struct addrinfo                 *servinfo;
-    //ssize_t num_bytes_rx;
-    /*
-    servInfo is just a pointer location  on the stack. Will point to the results. 
-    Haven't reserved location for the actual addrinfo structure
-    */
     struct sockaddr_in              peer_addr;
-    // struct sockaddr_in              sa;
     char ip4[INET_ADDRSTRLEN]; //space to hold the IPv4 string
     int yes=1;
-    // int recvfile_fd;
-    //Declare the initial buffer
+    SLIST_INIT(&head);
+    //pthread_mutex_init(&writeSocket, NULL);
 
-
-    
-
-    // signal(SIGINT, signal_handler);
-    // signal(SIGTERM, signal_handler);
-    // Setup SIGINT and SIGTERM
-    struct sigaction sig1;
-    memset(&sig1, 0, sizeof(struct sigaction));
-    sig1.sa_handler = signal_handler;
-    if( sigaction(SIGINT, &sig1, NULL) != 0)
-    {
-        syslog(LOG_ERR, "Error %d (%s) registering for SIGINT", errno, strerror(errno));
-        perror("sigint: fail");
-    }
-
-    struct sigaction sig2;
-    memset(&sig2, 0, sizeof(struct sigaction));
-    sig2.sa_handler = signal_handler;
-    if( sigaction(SIGTERM, &sig2, NULL) != 0)
-    {
-        syslog(LOG_ERR, "Error %d (%s) registering for SIGTERM", errno, strerror(errno));
-        perror("sigterm: fail");
-    }
+    //Initializes the signal handlers SIGINT and SIGTERM
+    init_sigHandler();
     
 
     if ((argc == 2) && (strcmp(argv[1], "-d") == 0))
@@ -187,9 +494,8 @@ int main(int argc, char *argv[])
         /*error*/
         int err = errno;
         syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
-        exit(1);
+        closeAll(EXIT_FAILURE);
     }
-    //syslog(LOG_DEBUG, "recvfile_fd is %d", recvfile_fd);
 
 
     memset(&hints, 0, sizeof(hints)); //empty the struct
@@ -197,19 +503,13 @@ int main(int argc, char *argv[])
     hints.ai_socktype = SOCK_STREAM;   // Datagram socket
     hints.ai_flags = AI_PASSIVE;      // For wildcard IP address, fill in my IP for me
 
-    //Not sure if these need to be initialized
-    // hints.ai_protocol = 0;            // Any protocol
-    // hints.ai_canonname = NULL;
-    // hints.ai_addr = NULL;
-    // hints.ai_next = NULL;
-
 
     // &servInfo is the not the pointer to the addrinfo struct,
     // but rather pointer to the location to store the pointer to that addrinfo
     if ((status = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0)
     {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "getaddrinfo pass");
@@ -218,7 +518,7 @@ int main(int argc, char *argv[])
     if ((sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) == -1)
     {
         perror("server: socket");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "socket pass");
@@ -226,7 +526,7 @@ int main(int argc, char *argv[])
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
     {
         perror("server: setsockopt");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
 
     syslog(LOG_DEBUG, "setsockopt pass");
@@ -234,25 +534,22 @@ int main(int argc, char *argv[])
     if (bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
     {
         perror("server: bind");
-        exit(EXIT_FAILURE);
+        closeAll(EXIT_FAILURE);
     }
+
+    syslog(LOG_DEBUG, "bind pass");
 
     freeaddrinfo(servinfo);
 
-    // when in daemon mode the program should fork after ensuring it can bind to port 9000.
     if(daemon_en)
     {
         if(create_daemon() != 0)
         {
+            syslog(LOG_ERR, "serve: daemon");
             perror("server: daemon");
-            exit(EXIT_FAILURE);
+            closeAll(EXIT_FAILURE);
         }
-
     }
-
- 
-
-    syslog(LOG_DEBUG, "bind pass");
 
     if (listen(sockfd, BACKLOG) == -1)
     {
@@ -262,173 +559,154 @@ int main(int argc, char *argv[])
 
     syslog(LOG_DEBUG, "listen pass");
 
-    syslog(LOG_DEBUG, "server: waiting for connections.........\n");
 
-    
-    
-    ssize_t incrementBy;
-    ssize_t bytes_rx = 0;
-    ssize_t addibuffer;
-    ssize_t bytes_read;
-    //ssize_t total_size;
-    char *send_my_buffer = NULL;
-    char *new_line = NULL;
-    ssize_t nr;
-    bool isPacketValid = false;
 
-    while(!caught_sigalarm){ //signal to exit this
-        bytes_read = 0;
-        incrementBy = BUF_SIZE;
-        isPacketValid = false;
+    //syslog(LOG_DEBUG, "Timer has been set");
+
+    //syslog(LOG_DEBUG, "server: waiting for connections.........\n");
+
+
+    initTimer();
+
+    //printf("Timer thread has been set\n");
+    
+    while(!sig){ 
+        
         peer_addrlen = sizeof(peer_addr);
-        //new_fd is the accepted fd
         if((new_fd = accept(sockfd, (struct sockaddr *)&peer_addr, &peer_addrlen)) == -1 )
         {
-            syslog(LOG_ERR, "server: accept, error here?????");
-            perror("server: accept");
-            //closeAll();
-            //exit(EXIT_FAILURE);
+            syslog(LOG_ERR, "server: acceptHERE?:");
+            perror("server: acceptHERE?:");
             continue;
         }
+        
+        //syslog(LOG_DEBUG, "Connected + Accepted, new_fd is %d", new_fd);
+
+        inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
+        //syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
+
+        my_threads *thread_data = (my_threads *)malloc(sizeof(my_threads));
+        if (thread_data == NULL)
+        {
+            syslog(LOG_ERR, "server: thread allocation");
+            perror("server: thread allocation");
+            continue;
+            //should I be exiting everything here or just keep trying
+        }
+        
+        thread_data->thread_info.afd = dup(new_fd);
+        if(thread_data->thread_info.afd == -1)
+        {
+            syslog(LOG_ERR, "Failed to duplicate file descriptor");
+            free(thread_data);
+            close(new_fd);
+            continue;
+        }
+        close(new_fd);
+        thread_data->thread_info.thread_complete_success = false;
+        strcpy(thread_data->thread_info.ip4, ip4);
+
+        int rc;
+
+        if((rc = pthread_create(&thread_data->thread_info.threadid, NULL, threadfunc, (void*) &(thread_data->thread_info))) != 0)
+        {
+            syslog(LOG_ERR, "Failed to pthread_create(), error was %d", rc);
+            perror("Failed to pthread_create()");
+            free(thread_data);
+            close(new_fd);
+            continue;
+        }
+
         else 
         {
-            syslog(LOG_DEBUG, "CONNECTED");
+            syslog(LOG_DEBUG, "pthread_created successfully. The threadID is %lu. AFD: %d", thread_data->thread_info.threadid, thread_data->thread_info.afd);
         }
-        //syslog(LOG_DEBUG, "new_fd is %d", new_fd);
-        inet_ntop(AF_INET, &(peer_addr.sin_addr), ip4, sizeof(ip4));
-        syslog(LOG_DEBUG, "Accepted connection from %s", ip4);
 
-        addibuffer = 0;
-        //total_size = BUF_SIZE;
-        char *my_buffer = (char *) malloc(BUF_SIZE);
-        if (my_buffer == NULL)
+
+        rc = pthread_mutex_lock(&ll_lock);
+        if (rc != 0)
         {
-            syslog(LOG_ERR, "Failed to malloc.");
-            close(new_fd);
-            exit(EXIT_FAILURE);
+            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }        
+        SLIST_INSERT_HEAD(&head, thread_data, nextThread);
+        rc = pthread_mutex_unlock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
         }
-        // set buffer values all to zero
-        memset(my_buffer, 0, BUF_SIZE);
 
-        do{
-            
-            bytes_rx = recv(new_fd, my_buffer + addibuffer, BUF_SIZE-1, 0); 
-            syslog(LOG_DEBUG, "i have received %ld bytes", bytes_rx);
-            if (bytes_rx < 0)
-            {
-                free(my_buffer);
-                perror("server: recv");
-                syslog(LOG_ERR, "recv: error??");
-                exit(EXIT_FAILURE);
-            }
-            addibuffer += bytes_rx; 
-            new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
-            if (new_line != NULL)
-            {
-                syslog(LOG_DEBUG, "YAY, slash n found");
-                isPacketValid = true;
-                addibuffer = new_line - my_buffer + 1; 
-                syslog(LOG_DEBUG, "addibuffer size within slash found %ld", addibuffer);
-            }
+        int join_rc;
+        my_threads *datap = NULL;
+        my_threads *temp = NULL;
 
-            else
+
+        rc = pthread_mutex_lock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_lock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }     
+
+        SLIST_FOREACH_SAFE(datap, &head, nextThread, temp)
+        {
+            if(datap->thread_info.thread_complete_success)
             {
-                my_buffer = realloc(my_buffer, incrementBy+BUF_SIZE);
-                if(my_buffer == NULL)
+                join_rc = pthread_join(datap->thread_info.threadid, NULL);
+                if(join_rc != 0) 
                 {
-                    syslog(LOG_ERR, "Failed to realloc.");
-                    close(new_fd);
-                    exit(EXIT_FAILURE);
+                    syslog(LOG_ERR, "Failed to pthread_join(), error was %d", join_rc);
+                    perror("Failed to pthread_join()");
+                    continue;
                 }
-                incrementBy += BUF_SIZE;
-                memset(my_buffer+addibuffer, 0 , incrementBy-addibuffer);
-                //addibuffer = 0;
-            }
-        //syslog(LOG_DEBUG, "I am here once only. %d", isPacketValid);
-
-        }while (isPacketValid == false);
-
-        //new line character has been found, now i want to send?
-        //append happens here, writing
-        if(isPacketValid == true)
-        {   
-            //my_buffer[addibuffer]= '\0';
-            //ssize_t write_size = new_line - my_buffer + 1;
-            syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
-            nr = write(recvfile_fd, my_buffer, addibuffer);
-            syslog(LOG_DEBUG, "nr is %ld",nr);
-            if (nr != addibuffer)
-            {
-                /*error*/
-                int err1 = errno;
-                syslog(LOG_ERR, "Failed to write bytes: errno -> %d", err1);
-                syslog(LOG_ERR, "error string is %s", strerror(errno));
-                exit(EXIT_FAILURE);
-            }
-
-            syslog(LOG_DEBUG, "Write completed to recvfile_fd");
-        }
-
-
-        free(my_buffer);
-
-        if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
-        {
-            syslog(LOG_ERR, "lseek error");
-            perror("lseek");
-        }
-
-        syslog(LOG_DEBUG, "lseek pass");
-        syslog(LOG_DEBUG, "addibuffer is %ld", addibuffer);
-        send_my_buffer = (char *) malloc(addibuffer);
-        if (send_my_buffer == NULL)
-        {
-            syslog(LOG_ERR, "Failed to malloc sending buffer.");
-            close(new_fd);
-            exit(EXIT_FAILURE);
-        }
-
-        
-        //int errno_read; 
-        //syslog(LOG_DEBUG, "I am here. Just before the while. addibuffer is %ld, %d", addibuffer, recvfile_fd);
-        while ((bytes_read = read(recvfile_fd, send_my_buffer, addibuffer)) > 0) {
-            syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
-            //syslog(LOG_DEBUG, "bytes_read inside while is %ld", bytes_read);
-            // for( int i = 0; i < bytes_read; i++)
-            // {
-            //     syslog(LOG_DEBUG, "%c", send_my_buffer[i]);
-            // }
-
-            //syslog(LOG_DEBUG, "strlen of send_my_buffer is %ld", strlen(send_my_buffer));
-            //syslog(LOG_DEBUG, "new_fd heree is %d", new_fd);
-            if (send(new_fd, send_my_buffer, bytes_read, 0) != bytes_read)
-            {
-                syslog(LOG_DEBUG,"HEREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
-                syslog(LOG_ERR,"server: send");
-                perror("server: send");
-                exit(EXIT_FAILURE);
+                syslog(LOG_DEBUG, "Joined thread %lu", datap->thread_info.threadid);
+                SLIST_REMOVE(&head, datap, slist_data_s, nextThread);
+                free(datap);
+                datap = NULL;
             }
             else
             {
-                syslog(LOG_DEBUG, "send pass");
+                //syslog(LOG_DEBUG, "I did not join on threadID = %lu", datap->thread_info.threadid);
             }
         }
-        //errno_read = errno;
 
-        // syslog(LOG_DEBUG, "bytes_read after while is %ld", bytes_read);
-        // syslog(LOG_ERR, "errno is %d", errno_read);
-        // syslog(LOG_ERR, "Error message: %s", strerror(errno));
-
-
-        close(new_fd);
-        free(send_my_buffer);
-        
-        syslog(LOG_DEBUG, "Closed connection from %s", ip4);
-        syslog(LOG_DEBUG, "_________________________________________________________");
+        rc = pthread_mutex_unlock(&ll_lock);
+        if (rc != 0)
+        {
+            syslog(LOG_ERR, "pthread_mutex_unlock failed on ll_lock, error was %d", rc);
+            perror("pthread mutex_lock failed");
+        }
     }
 
-    syslog(LOG_DEBUG, "AM I EVER HERE?");
-    closeAll();
+    my_threads *datap1 = NULL;
+    my_threads *temp1 = NULL;
+    int join_rc1;
 
-    //return 0;
+    if(SLIST_EMPTY(&head))
+    {
+        printf("The list is empty\n");
+    }
+    else
+    {
+        //printf("\nThe list is not empty. About to join every threads\n");
+        SLIST_FOREACH_SAFE(datap1, &head, nextThread, temp1)
+        {
+                join_rc1 = pthread_join(datap1->thread_info.threadid, NULL);
+                if(join_rc1 != 0) 
+                {
+                    syslog(LOG_ERR, "Failed to pthread_join(), error was %d", join_rc1);
+                    perror("Failed to pthread_join()");
+                    continue;
+                }
+                syslog(LOG_DEBUG, "Joined thread %lu", datap1->thread_info.threadid);
+                SLIST_REMOVE(&head, datap1, slist_data_s, nextThread);
+                free(datap1);
+                datap1 = NULL;
+        }
+    }
+
+    syslog(LOG_DEBUG, "Do I reach here?");
+    closeAll(EXIT_SUCCESS);
+    return 0;
 }
