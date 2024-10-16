@@ -55,7 +55,6 @@
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t size_val = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ll_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
@@ -206,7 +205,6 @@ void closeAll(int exit_flag)
     pthread_mutex_destroy(&writeSocket);
     pthread_mutex_destroy(&ll_lock);
     syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
-    pthread_mutex_destroy(&size_val);
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
     exit(exit_flag);
@@ -282,22 +280,7 @@ void *threadtimerfunc(void *args)
             }
             continue;
         }
-
-        rc = pthread_mutex_lock(&size_val);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
-            perror("pthread mutex_lock failed");
-        }
-
         total_size += strlen(timestamp);
-
-        rc = pthread_mutex_unlock(&size_val);
-        if (rc != 0)
-        {
-            syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
-            perror("pthread mutex_lock failed");
-        }
 
         rc = pthread_mutex_unlock(&writeSocket);
         if (rc != 0)
@@ -389,6 +372,8 @@ void *threadfunc(void *args)
 
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
+        total_size += supplementBuf;
+
         rc = pthread_mutex_unlock(&writeSocket);
         if (rc != 0)
         {
@@ -410,29 +395,11 @@ void *threadfunc(void *args)
 
     }
 
-    rc = pthread_mutex_lock(&size_val);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
-
-    total_size += supplementBuf;
-
-    rc = pthread_mutex_unlock(&size_val);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
 
     free(my_buffer);
     my_buffer = NULL;
 
 
-
-
-   
     rc = pthread_mutex_lock(&writeSocket);
     if (rc != 0)
     {
@@ -447,30 +414,6 @@ void *threadfunc(void *args)
         closeAll(EXIT_FAILURE);
     }
 
-    rc = pthread_mutex_unlock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
-        perror("pthread mutex_unlock failed");
-    }
-
-
-    rc = pthread_mutex_lock(&size_val);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_lock failed on total size, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
-
-    ssize_t remaining = total_size;
-
-    rc = pthread_mutex_unlock(&size_val);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_unlock failed on total size, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
-
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
@@ -481,8 +424,8 @@ void *threadfunc(void *args)
     int errnum9 = 0;
 
     //printf("total size here is %ld, \n", total_size);
-    syslog(LOG_DEBUG, "total size here is %ld", remaining);
-    while ((bytes_read = read(recvfile_fd, send_my_buffer, remaining)) > 0) {
+    syslog(LOG_DEBUG, "total size here is %ld", total_size);
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
@@ -498,6 +441,13 @@ void *threadfunc(void *args)
         {
             syslog(LOG_DEBUG, "send passed");
         }
+    }
+
+    rc = pthread_mutex_unlock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
+        perror("pthread mutex_unlock failed");
     }
 
 
@@ -625,8 +575,8 @@ int main(int argc, char *argv[])
         peer_addrlen = sizeof(peer_addr);
         if((new_fd = accept(sockfd, (struct sockaddr *)&peer_addr, &peer_addrlen)) == -1 )
         {
-            syslog(LOG_ERR, "server: accept");
-            perror("server: accept");
+            syslog(LOG_ERR, "server: acceptHERE?:");
+            perror("server: acceptHERE?:");
             continue;
         }
         
@@ -757,7 +707,6 @@ int main(int argc, char *argv[])
     }
 
     syslog(LOG_DEBUG, "Do I reach here?");
-    //printf("Do I reach here?\n");
     closeAll(EXIT_SUCCESS);
     return 0;
 }
