@@ -12,7 +12,8 @@ endif
 EXTRA_CFLAGS += $(DEBFLAGS)
 
 ifneq ($(KERNELRELEASE),)
-# call from kernel build system
+# call from kernel build system. If KERNELRELEASE is defined, we've been invoked from the kernel build system and can use its language.
+# Credit: Linux Device Drivers Chapter 2: Building and Running Kernels
 obj-m	:= aesdchar.o
 aesdchar-y := aesd-circular-buffer.o main.o
 else
