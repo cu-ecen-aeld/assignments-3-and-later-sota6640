@@ -51,8 +51,9 @@ struct cdev *i_cdev is the kernel's internal structure that represents
 char devices. */
 int aesd_open(struct inode *inode, struct file *filp)
 {
-    PDEBUG("open");
     struct aesd_dev *dev; /* device information */
+    PDEBUG("open");
+    
     dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
     filp->private_data = dev; /*for other methods*/
     return 0; /* success */
@@ -101,7 +102,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     {
         retval = -ERESTARTSYS;
         PDEBUG("mutex lock interruptible, returning %zu", retval);
-        goto errrout;
+        goto errout;
     }
     
     entry = aesd_circular_buffer_find_entry_offset_for_fpos(&(dev->circular), *f_pos, &entry_offset_rd);
@@ -146,8 +147,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     //destination is the circular buffer
     ssize_t retval = -ENOMEM;
     size_t write_bytes = 0;
+    size_t i = 0;
     struct aesd_dev *dev = NULL;
-    char* entry_to_free = NULL; 
+    const char* entry_to_free = NULL; 
     char* buftemp = NULL; 
     char *newline_ptr = NULL;
     bool nline_found = false;
@@ -157,7 +159,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     {
         retval = -EINVAL;
         PDEBUG("file pointer filp NULL, returning %zu", retval);
-        goto errout;
+        return retval;
     }
 
     dev = filp->private_data;
@@ -184,8 +186,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         PDEBUG("mutex lock interruptible, returning %zu", retval);
         goto free_out;
     }
-
-    for(size_t i = 0; i < count; i++)
+    
+    for(i = 0; i < count; i++)
     {
         if(buftemp[i] == '\n')
         {
@@ -205,7 +207,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         goto out;
     }
 
-    memcpy(dev->entry.buffptr + dev->entry.size, buftemp, write_bytes);
+    memcpy((char *)(dev->entry.buffptr+dev->entry.size), buftemp, write_bytes);
     dev->entry.size += write_bytes;
 
 
@@ -217,8 +219,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
             kfree(entry_to_free);
         }
         //entry completed, reset buffptr and size
-        entry->buffptr = NULL;
-        entry->size = 0;
+        dev->entry.buffptr = NULL;
+        dev->entry.size = 0;
     }
 
     retval = count;
@@ -295,10 +297,12 @@ int aesd_init_module(void)
 
 void aesd_cleanup_module(void)
 {
+    struct aesd_buffer_entry *del_entry = NULL;
+    uint8_t index;
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
-    struct aesd_buffer_entry *del_entry = NULL;
+
 
      AESD_CIRCULAR_BUFFER_FOREACH(del_entry, &(aesd_device.circular), index)
      {
