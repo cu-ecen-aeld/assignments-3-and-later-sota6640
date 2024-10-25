@@ -30,7 +30,7 @@
 
 
 #include "aesdchar.h"
-#include "aesd-circular-buffer.h"
+
 
 
 int aesd_major =   0; // use dynamic major, so these don't matter
@@ -77,48 +77,163 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         buff - buffer to fill. Can we access this buffer directly? No, use copy_to_user, read 
         from device basically. count - max number of bytes to write to buff. You 
         may want/need to write less than this*/
-
-
-    struct aesd_dev *dev = filp->private_data;
-
+    //*buf is the buffer to fill, copy from kernel space to user space
+    //count - max number of bytes to write ("read into") buff, 
+    // May want/need to write less than this
+    // also reading the f_pos which is the char_offset??
     ssize_t retval = 0;
+    ssize_t read_bytes;
+    size_t entry_offset_rd;
+    struct aesd_dev *dev = NULL;
+    struct aesd_buffer_entry *entry = NULL;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
-    retval = copy_to_user(buf,,count);
-
-    if (retval == count)
+    if (filp == NULL || buf == NULL)
     {
-
+        retval = -EINVAL;
+        PDEBUG("file pointer filp NULL, returning %zu", retval);
+        goto errout;
     }
 
-    if (retval > 0 && retval < count)
-    {
+    dev = filp->private_data; //device pointer acquired here
 
+    if (mutex_lock_interruptible(&dev->bufferlock))
+    {
+        retval = -ERESTARTSYS;
+        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        goto errrout;
+    }
+    
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&(dev->circular), *f_pos, &entry_offset_rd);
+
+    if (entry == NULL)
+    {
+        retval = 0;
+        PDEBUG("aesd_circular_buffer_find_entry_offset_for_fpos NULL return %zu", retval);
+        goto out; //mutex is held so can't goto errout
     }
 
-    if (!retval)
+    //check/get the minimum between count and the size minus the entry offset
+    read_bytes = ((entry->size - entry_offset_rd) < count) ? (entry->size - entry_offset_rd) : count;
+
+    if(copy_to_user(buf, (entry->buffptr + entry_offset_rd), read_bytes))
     {
-        //EOF, no data read
+        retval = -EFAULT;
+        PDEBUG("copy_to_user non-negative value, returning %zu", retval);
+        goto out; //mutex is held so can't goto errout
     }
 
-    if (retval < 0)
-    {
-        return -ERESTARTSYS;
-    }
+    //point to the next offset
+    *f_pos += read_bytes;
+    retval = read_bytes;
+    goto out;
 
+    errout:
+    return retval;
+
+    out:
+    mutex_unlock(&dev->bufferlock);
     return retval;
 }
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
+    //ignore *f_pos???
+    // either append to the command being written when there's no
+    //newline received or
+    //write to the command buffer when a newline is received
+    //destination is the circular buffer
     ssize_t retval = -ENOMEM;
+    size_t write_bytes = 0;
+    struct aesd_dev *dev = NULL;
+    char* entry_to_free = NULL; 
+    char* buftemp = NULL; 
+    char *newline_ptr = NULL;
+    bool nline_found = false;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
-    /**
-     * TODO: handle write
-     */
+
+    if (filp == NULL || buf == NULL)
+    {
+        retval = -EINVAL;
+        PDEBUG("file pointer filp NULL, returning %zu", retval);
+        goto errout;
+    }
+
+    dev = filp->private_data;
+
+    //kmalloc required count
+    buftemp = kmalloc(count, GFP_KERNEL);
+    if (buftemp == NULL)
+    {
+        PDEBUG("kmalloc allocation failed.");
+        retval = -ENOMEM;
+        return retval;
+    }
+
+    //read from user into kernel, destination is buftemp
+    if (copy_from_user(buftemp, buf, count)) {
+        PDEBUG("copy_from_user failed");
+		retval = -EFAULT;
+		goto free_out;
+    }
+
+    if (mutex_lock_interruptible(&dev->bufferlock))
+    {
+        retval = -ERESTARTSYS;
+        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        goto free_out;
+    }
+
+    for(size_t i = 0; i < count; i++)
+    {
+        if(buftemp[i] == '\n')
+        {
+            newline_ptr = &buftemp[i];
+            nline_found = true;
+            break;
+        }
+    }
+
+    write_bytes = (newline_ptr) ? (newline_ptr -&buftemp[0]+1) : count;
+    
+    dev->entry.buffptr = krealloc(dev->entry.buffptr, dev->entry.size+write_bytes, GFP_KERNEL);
+    if(dev->entry.buffptr == NULL)
+    {
+        PDEBUG("krealloc failed here.");
+        retval = -ENOMEM;
+        goto out;
+    }
+
+    memcpy(dev->entry.buffptr + dev->entry.size, buftemp, write_bytes);
+    dev->entry.size += write_bytes;
+
+
+    if (nline_found)
+    {
+        entry_to_free = aesd_circular_buffer_add_entry(&dev->circular, &dev->entry);
+        if (entry_to_free != NULL)
+        {
+            kfree(entry_to_free);
+        }
+        //entry completed, reset buffptr and size
+        entry->buffptr = NULL;
+        entry->size = 0;
+    }
+
+    retval = count;
+    goto out;
+
+
+    out:
+    mutex_unlock(&dev->bufferlock);
+
+    free_out:
+    kfree(buftemp);
     return retval;
 }
+
+
 // function pointers for the file operations
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
@@ -183,12 +298,21 @@ void aesd_cleanup_module(void)
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
+    struct aesd_buffer_entry *del_entry = NULL;
+
+     AESD_CIRCULAR_BUFFER_FOREACH(del_entry, &(aesd_device.circular), index)
+     {
+        if(del_entry->buffptr)
+            kfree(del_entry->buffptr);
+     }
+
+    
 
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      * Not dynamically allocating anything so shouldn't need anything here
      */
-
+    mutex_destroy(&aesd_device.bufferlock);
     unregister_chrdev_region(devno, 1);
 }
 
