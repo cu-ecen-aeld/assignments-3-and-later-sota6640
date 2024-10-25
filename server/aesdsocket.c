@@ -43,6 +43,11 @@
 //#include <sys/queue.h>
 #include "queue.h"
 
+/**
+ * Assignment 8 Additions
+ */
+#define USE_AESD_CHAR_DEVICE        (1)
+
 #define PORT "9000" // the port users will be connecting to 
 //const char* port = "9000";
 
@@ -85,7 +90,11 @@ int recvfile_fd = -1;
 static ssize_t total_size = 0;
 
 pid_t pid;
+#ifdef USE_AESD_CHAR_DEVICE
+const char *recvfile = "/dev/aesdchar";
+#else
 const char *recvfile = "/var/tmp/aesdsocketdata";
+#endif
 //const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
 static void closeAll(int exit_flag);
 static void initTimer(void);
@@ -195,10 +204,12 @@ void closeAll(int exit_flag)
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    if(remove(recvfile) != 0)
-    {
-       syslog(LOG_ERR, "File removal not successful");
-    }
+    #ifndef USE_AESD_CHAR_DEVICE
+        if(remove(recvfile) != 0)
+        {
+            syslog(LOG_ERR, "File removal not successful");
+        }
+    #endif
     syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
     //timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
@@ -565,8 +576,9 @@ int main(int argc, char *argv[])
 
     //syslog(LOG_DEBUG, "server: waiting for connections.........\n");
 
-
+    #ifndef USE_AESD_CHAR_DEVICE
     initTimer();
+    #endif
 
     //printf("Timer thread has been set\n");
     
