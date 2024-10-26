@@ -16,6 +16,7 @@ ifneq ($(KERNELRELEASE),)
 # Credit: Linux Device Drivers Chapter 2: Building and Running Kernels
 obj-m	:= aesdchar.o
 aesdchar-y := aesd-circular-buffer.o main.o
+KBUILD_OPTIONS += NO_BTF=1
 else
 
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
