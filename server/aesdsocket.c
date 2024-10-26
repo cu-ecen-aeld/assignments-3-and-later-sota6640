@@ -97,7 +97,10 @@ const char *recvfile = "/var/tmp/aesdsocketdata";
 #endif
 //const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
 static void closeAll(int exit_flag);
+
+#ifndef USE_AESD_CHAR_DEVICE
 static void initTimer(void);
+#endif
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
 void *threadfunc(void *arg);
@@ -181,7 +184,7 @@ static int create_daemon()
 
         return 0;
 }
-
+#ifndef USE_AESD_CHAR_DEVICE
 static void initTimer(void)
 {
     int timer_rc;
@@ -194,7 +197,7 @@ static void initTimer(void)
     syslog(LOG_DEBUG, "Timer thread created successfully");
     return;
 }
-
+#endif
 
 
 void closeAll(int exit_flag)
