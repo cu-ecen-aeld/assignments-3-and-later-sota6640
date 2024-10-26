@@ -60,7 +60,9 @@
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
+#if (USE_AESD_CHAR_DEVICE==0)
 pthread_t timertid;
+#endif
 
 
 struct thread_info_s{
@@ -90,15 +92,15 @@ int recvfile_fd = -1;
 static ssize_t total_size = 0;
 
 pid_t pid;
-#ifdef USE_AESD_CHAR_DEVICE
+#if (USE_AESD_CHAR_DEVICE==1)
 const char *recvfile = "/dev/aesdchar";
 #else
 const char *recvfile = "/var/tmp/aesdsocketdata";
 #endif
-//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
+
 static void closeAll(int exit_flag);
 
-#ifndef USE_AESD_CHAR_DEVICE
+#if (USE_AESD_CHAR_DEVICE==0)
 static void initTimer(void);
 #endif
 static void init_sigHandler(void);
@@ -184,7 +186,7 @@ static int create_daemon()
 
         return 0;
 }
-#ifndef USE_AESD_CHAR_DEVICE
+#if (USE_AESD_CHAR_DEVICE==0)
 static void initTimer(void)
 {
     int timer_rc;
@@ -306,6 +308,7 @@ void *threadtimerfunc(void *args)
     //printf("Thread should be completed here.\n");
     //thread_func_args->thread_info.thread_complete_success = true;
     return NULL;
+
 }
 void *threadfunc(void *args)
 {
@@ -420,14 +423,14 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
         perror("pthread mutex_lock failed");
     }
-
+    #if (USE_AESD_CHAR_DEVICE==0)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
     {
         syslog(LOG_ERR, "server: lseek");
         perror("server: lseek");
         closeAll(EXIT_FAILURE);
     }
-
+    #endif
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
@@ -507,7 +510,8 @@ int main(int argc, char *argv[])
     {
         /*error*/
         int err = errno;
-        syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
+        syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+        syslog(LOG_ERR, "Error: %s", strerror(errno));
         closeAll(EXIT_FAILURE);
     }
 
@@ -695,12 +699,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    #if (USE_AESD_CHAR_DEVICE==0)
     pthread_cancel(timertid);
     join_rc1 = pthread_join(timertid, NULL);
     if (join_rc1 != 0)
     {
         syslog(LOG_ERR, "Timer thread failed to join.");
     }
+    #endif
     syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
     return 0;
