@@ -423,14 +423,14 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
         perror("pthread mutex_lock failed");
     }
-    #if (USE_AESD_CHAR_DEVICE==0)
+    //#if (USE_AESD_CHAR_DEVICE==0)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
     {
         syslog(LOG_ERR, "server: lseek");
         perror("server: lseek");
         closeAll(EXIT_FAILURE);
     }
-    #endif
+    //#endif
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
