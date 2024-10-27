@@ -274,7 +274,7 @@ void *threadtimerfunc(void *args)
         tm = localtime(&now);
         
 
-        if(strftime(timestamp, sizeof(timestamp), "timestamp:%Y-%m-%d %H:%M:%S\n", tm)==0)
+        if(strftime(timestamp, sizeof(timestamp), "timestampppppp:%Y-%m-%d %H:%M:%S\n", tm)==0)
         {
             syslog(LOG_ERR,"strftime failed");
             continue;
