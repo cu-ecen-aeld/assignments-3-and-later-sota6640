@@ -106,7 +106,9 @@ static void initTimer(void);
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
 void *threadfunc(void *arg);
+#if (USE_AESD_CHAR_DEVICE == 0)
 void *threadtimerfunc(void *arg);
+#endif
 void timer_handler(int signo);
 
 static void signal_handler (int signal_number)
@@ -224,7 +226,7 @@ void closeAll(int exit_flag)
     exit(exit_flag);
 }
 
-
+#if (USE_AESD_CHAR_DEVICE == 0)
 void *threadtimerfunc(void *args)
 {
     //my_threads *thread_func_args = (my_threads *) args;
@@ -310,6 +312,8 @@ void *threadtimerfunc(void *args)
     return NULL;
 
 }
+#endif
+
 void *threadfunc(void *args)
 {
     my_threads *thread_func_args = (my_threads *) args;
@@ -380,6 +384,12 @@ void *threadfunc(void *args)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
+        // if(lseek(recvfile_fd, 0, SEEK_END) == -1)
+        // {
+        //     syslog(LOG_ERR, "server: lseek end");
+        //     perror("server: lseek end");
+        //     closeAll(EXIT_FAILURE);
+        // }
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
         {
@@ -427,7 +437,7 @@ void *threadfunc(void *args)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
     {
         syslog(LOG_ERR, "server: lseek");
-        perror("server: lseek");
+        perror("server: lseek set");
         closeAll(EXIT_FAILURE);
     }
     //#endif
