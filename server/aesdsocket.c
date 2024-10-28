@@ -449,7 +449,12 @@ void *threadfunc(void *args)
     free(my_buffer);
     my_buffer = NULL;
 
-
+    rc = pthread_mutex_lock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
 
     #if (USE_AESD_CHAR_DEVICE==0)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
@@ -475,12 +480,7 @@ void *threadfunc(void *args)
     #endif
 
     
-    rc = pthread_mutex_lock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
+
 
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
