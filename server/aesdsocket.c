@@ -385,7 +385,7 @@ void *threadfunc(void *args)
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
         #if (USE_AESD_CHAR_DEVICE == 1)
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, 0744);
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRGRP | S_IROTH);
         if (recvfile_fd == -1) 
         {
             /*error*/
@@ -452,7 +452,7 @@ void *threadfunc(void *args)
         closeAll(EXIT_FAILURE);
     }
     #else
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, 0744);
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRGRP | S_IROTH);
         if (recvfile_fd == -1) 
         {
             /*error*/
@@ -538,7 +538,7 @@ int main(int argc, char *argv[])
 
     //#if(USE_AESD_CHAR_DEVICE == 1)
     //Receives data over the connection and appends to file "/var/tmp/aesdsocketdata", creating this file if it doesn't exist.
-    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (recvfile_fd == -1) 
     {
         /*error*/
