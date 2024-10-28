@@ -384,12 +384,18 @@ void *threadfunc(void *args)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
-        // if(lseek(recvfile_fd, 0, SEEK_END) == -1)
-        // {
-        //     syslog(LOG_ERR, "server: lseek end");
-        //     perror("server: lseek end");
-        //     closeAll(EXIT_FAILURE);
-        // }
+        #if (USE_AESD_CHAR_DEVICE == 1)
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, 0744);
+        if (recvfile_fd == -1) 
+        {
+            /*error*/
+            int err = errno;
+            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+            syslog(LOG_ERR, "Error: %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+        #endif
+
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
         {
@@ -420,11 +426,16 @@ void *threadfunc(void *args)
 
         syslog(LOG_DEBUG, "Write completed to recvfile_fd");
 
+    #if(USE_AESD_CHAR_DEVICE == 1)
+    close(recvfile_fd);
+    #endif
     }
 
 
     free(my_buffer);
     my_buffer = NULL;
+
+
 
 
     rc = pthread_mutex_lock(&writeSocket);
@@ -433,14 +444,24 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
         perror("pthread mutex_lock failed");
     }
-    //#if (USE_AESD_CHAR_DEVICE==0)
+    #if (USE_AESD_CHAR_DEVICE==0)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
     {
         syslog(LOG_ERR, "server: lseek");
         perror("server: lseek set");
         closeAll(EXIT_FAILURE);
     }
-    //#endif
+    #else
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, 0744);
+        if (recvfile_fd == -1) 
+        {
+            /*error*/
+            int err = errno;
+            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+            syslog(LOG_ERR, "Error: %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+    #endif
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
@@ -449,6 +470,8 @@ void *threadfunc(void *args)
     }
 
     int errnum9 = 0;
+
+
 
     //printf("total size here is %ld, \n", total_size);
     syslog(LOG_DEBUG, "total size here is %ld", total_size);
@@ -476,8 +499,9 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
         perror("pthread mutex_unlock failed");
     }
-
-
+    #if(USE_AESD_CHAR_DEVICE==1)
+    close(recvfile_fd);
+    #endif
     free(send_my_buffer);
     send_my_buffer = NULL;
     thread_func_args->thread_info.thread_complete_success = true;
@@ -512,10 +536,9 @@ int main(int argc, char *argv[])
     else    
         daemon_en = false;
 
-
+    //#if(USE_AESD_CHAR_DEVICE == 1)
     //Receives data over the connection and appends to file "/var/tmp/aesdsocketdata", creating this file if it doesn't exist.
-    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC,
-            S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
     if (recvfile_fd == -1) 
     {
         /*error*/
@@ -524,7 +547,7 @@ int main(int argc, char *argv[])
         syslog(LOG_ERR, "Error: %s", strerror(errno));
         closeAll(EXIT_FAILURE);
     }
-
+    //#endif
 
     memset(&hints, 0, sizeof(hints)); //empty the struct
     hints.ai_family = AF_UNSPEC;      //Allow IPv4 or IPv6
