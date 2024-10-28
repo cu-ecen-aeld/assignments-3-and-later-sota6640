@@ -385,7 +385,7 @@ void *threadfunc(void *args)
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
         #if (USE_AESD_CHAR_DEVICE == 1)
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRGRP | S_IROTH);
         if (recvfile_fd == -1) 
         {
             /*error*/
@@ -407,7 +407,7 @@ void *threadfunc(void *args)
             perror("pthread mutex_lock failed");
         }
 
-        lseek(recvfile_fd, 0, SEEK_END);
+        //lseek(recvfile_fd, 0, SEEK_END);
 
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
@@ -449,12 +449,7 @@ void *threadfunc(void *args)
     free(my_buffer);
     my_buffer = NULL;
 
-    rc = pthread_mutex_lock(&writeSocket);
-    if (rc != 0)
-    {
-        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
-        perror("pthread mutex_lock failed");
-    }
+
 
     #if (USE_AESD_CHAR_DEVICE==0)
     if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
@@ -464,7 +459,7 @@ void *threadfunc(void *args)
         closeAll(EXIT_FAILURE);
     }
     #else
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRGRP | S_IROTH);
         if (recvfile_fd == -1) 
         {
             /*error*/
@@ -480,6 +475,13 @@ void *threadfunc(void *args)
     #endif
 
     
+    rc = pthread_mutex_lock(&writeSocket);
+    if (rc != 0)
+    {
+        syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
+        perror("pthread mutex_lock failed");
+    }
+
 
 
     send_my_buffer = (char *) malloc(BUF_SIZE);
