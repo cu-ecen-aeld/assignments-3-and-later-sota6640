@@ -538,15 +538,15 @@ int main(int argc, char *argv[])
 
     //#if(USE_AESD_CHAR_DEVICE == 1)
     //Receives data over the connection and appends to file "/var/tmp/aesdsocketdata", creating this file if it doesn't exist.
-    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (recvfile_fd == -1) 
-    {
-        /*error*/
-        int err = errno;
-        syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
-        syslog(LOG_ERR, "Error: %s", strerror(errno));
-        closeAll(EXIT_FAILURE);
-    }
+    // recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    // if (recvfile_fd == -1) 
+    // {
+    //     /*error*/
+    //     int err = errno;
+    //     syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+    //     syslog(LOG_ERR, "Error: %s", strerror(errno));
+    //     closeAll(EXIT_FAILURE);
+    // }
     //#endif
 
     memset(&hints, 0, sizeof(hints)); //empty the struct
