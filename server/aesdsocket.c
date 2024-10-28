@@ -394,6 +394,10 @@ void *threadfunc(void *args)
             syslog(LOG_ERR, "Error: %s", strerror(errno));
             closeAll(EXIT_FAILURE);
         }
+        else
+        {
+            syslog(LOG_DEBUG, "HANDLE OPENED 1");
+        }
         #endif
 
         rc = pthread_mutex_lock(&writeSocket);
@@ -427,7 +431,15 @@ void *threadfunc(void *args)
         syslog(LOG_DEBUG, "Write completed to recvfile_fd");
 
     #if(USE_AESD_CHAR_DEVICE == 1)
-    close(recvfile_fd);
+    if(close(recvfile_fd) == -1)
+    {   
+        syslog(LOG_ERR, "Failed to close recvfile.");
+        syslog(LOG_ERR, "error string is %s", strerror(errno));
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE CLOSED 1");
+    }
     #endif
     }
 
@@ -460,6 +472,10 @@ void *threadfunc(void *args)
             syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
             syslog(LOG_ERR, "Error: %s", strerror(errno));
             closeAll(EXIT_FAILURE);
+        }
+        else
+        {
+            syslog(LOG_DEBUG, "HANDLE OPENED 2");
         }
     #endif
     send_my_buffer = (char *) malloc(BUF_SIZE);
@@ -500,7 +516,15 @@ void *threadfunc(void *args)
         perror("pthread mutex_unlock failed");
     }
     #if(USE_AESD_CHAR_DEVICE==1)
-    close(recvfile_fd);
+    if(close(recvfile_fd) == -1)
+    {   
+        syslog(LOG_ERR, "Failed to close recvfile. 2nd");
+        syslog(LOG_ERR, "error string is %s", strerror(errno));
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE CLOSED 2");
+    }
     #endif
     free(send_my_buffer);
     send_my_buffer = NULL;
