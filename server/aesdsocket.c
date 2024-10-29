@@ -43,6 +43,11 @@
 //#include <sys/queue.h>
 #include "queue.h"
 
+/**
+ * Assignment 8 Additions
+ */
+#define USE_AESD_CHAR_DEVICE        (1)
+
 #define PORT "9000" // the port users will be connecting to 
 //const char* port = "9000";
 
@@ -55,7 +60,9 @@
 typedef struct thread_info_s thread_info_t;
 typedef struct slist_data_s my_threads;
 pthread_mutex_t writeSocket = PTHREAD_MUTEX_INITIALIZER;
+#if (USE_AESD_CHAR_DEVICE==0)
 pthread_t timertid;
+#endif
 
 
 struct thread_info_s{
@@ -85,14 +92,23 @@ int recvfile_fd = -1;
 static ssize_t total_size = 0;
 
 pid_t pid;
+#if (USE_AESD_CHAR_DEVICE==1)
+const char *recvfile = "/dev/aesdchar";
+#else
 const char *recvfile = "/var/tmp/aesdsocketdata";
-//const char *recvfile = "/home/stamrakar/AESD/assignment-1-sota6640/server/aesdsocketdata";
+#endif
+
 static void closeAll(int exit_flag);
+
+#if (USE_AESD_CHAR_DEVICE==0)
 static void initTimer(void);
+#endif
 static void init_sigHandler(void);
 static void signal_handler(int signal_number);
 void *threadfunc(void *arg);
+#if (USE_AESD_CHAR_DEVICE == 0)
 void *threadtimerfunc(void *arg);
+#endif
 void timer_handler(int signo);
 
 static void signal_handler (int signal_number)
@@ -172,7 +188,7 @@ static int create_daemon()
 
         return 0;
 }
-
+#if (USE_AESD_CHAR_DEVICE==0)
 static void initTimer(void)
 {
     int timer_rc;
@@ -185,7 +201,7 @@ static void initTimer(void)
     syslog(LOG_DEBUG, "Timer thread created successfully");
     return;
 }
-
+#endif
 
 
 void closeAll(int exit_flag)
@@ -195,10 +211,12 @@ void closeAll(int exit_flag)
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
-    if(remove(recvfile) != 0)
-    {
-       syslog(LOG_ERR, "File removal not successful");
-    }
+    #ifndef USE_AESD_CHAR_DEVICE
+        if(remove(recvfile) != 0)
+        {
+            syslog(LOG_ERR, "File removal not successful");
+        }
+    #endif
     syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
     //timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
@@ -208,7 +226,7 @@ void closeAll(int exit_flag)
     exit(exit_flag);
 }
 
-
+#if (USE_AESD_CHAR_DEVICE == 0)
 void *threadtimerfunc(void *args)
 {
     //my_threads *thread_func_args = (my_threads *) args;
@@ -256,7 +274,7 @@ void *threadtimerfunc(void *args)
         tm = localtime(&now);
         
 
-        if(strftime(timestamp, sizeof(timestamp), "timestamp:%Y-%m-%d %H:%M:%S\n", tm)==0)
+        if(strftime(timestamp, sizeof(timestamp), "timestampppppp:%Y-%m-%d %H:%M:%S\n", tm)==0)
         {
             syslog(LOG_ERR,"strftime failed");
             continue;
@@ -292,7 +310,10 @@ void *threadtimerfunc(void *args)
     //printf("Thread should be completed here.\n");
     //thread_func_args->thread_info.thread_complete_success = true;
     return NULL;
+
 }
+#endif
+
 void *threadfunc(void *args)
 {
     my_threads *thread_func_args = (my_threads *) args;
@@ -363,12 +384,30 @@ void *threadfunc(void *args)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
+        #if (USE_AESD_CHAR_DEVICE == 1)
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+        if (recvfile_fd == -1) 
+        {
+            /*error*/
+            int err = errno;
+            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+            syslog(LOG_ERR, "Error: %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+        else
+        {
+            syslog(LOG_DEBUG, "HANDLE OPENED 1");
+        }
+        #endif
+
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
         {
             syslog(LOG_ERR, "pthread_mutex_lock failed, error was %d", rc);
             perror("pthread mutex_lock failed");
         }
+
+        lseek(recvfile_fd, 0, SEEK_END);
 
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
@@ -393,6 +432,17 @@ void *threadfunc(void *args)
 
         syslog(LOG_DEBUG, "Write completed to recvfile_fd");
 
+    #if(USE_AESD_CHAR_DEVICE == 1)
+    if(close(recvfile_fd) == -1)
+    {   
+        syslog(LOG_ERR, "Failed to close recvfile.");
+        syslog(LOG_ERR, "error string is %s", strerror(errno));
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE CLOSED 1");
+    }
+    #endif
     }
 
 
@@ -400,6 +450,31 @@ void *threadfunc(void *args)
     my_buffer = NULL;
 
 
+
+    #if (USE_AESD_CHAR_DEVICE==0)
+    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
+    {
+        syslog(LOG_ERR, "server: lseek");
+        perror("server: lseek set");
+        closeAll(EXIT_FAILURE);
+    }
+    #else
+        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+        if (recvfile_fd == -1) 
+        {
+            /*error*/
+            int err = errno;
+            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+            syslog(LOG_ERR, "Error: %s", strerror(errno));
+            closeAll(EXIT_FAILURE);
+        }
+        else
+        {
+            syslog(LOG_DEBUG, "HANDLE OPENED 2");
+        }
+    #endif
+
+    
     rc = pthread_mutex_lock(&writeSocket);
     if (rc != 0)
     {
@@ -407,13 +482,7 @@ void *threadfunc(void *args)
         perror("pthread mutex_lock failed");
     }
 
-    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
-    {
-        syslog(LOG_ERR, "server: lseek");
-        perror("server: lseek");
-        closeAll(EXIT_FAILURE);
-    }
-
+    
     send_my_buffer = (char *) malloc(BUF_SIZE);
     if (send_my_buffer == NULL)
     {
@@ -422,6 +491,8 @@ void *threadfunc(void *args)
     }
 
     int errnum9 = 0;
+
+
 
     //printf("total size here is %ld, \n", total_size);
     syslog(LOG_DEBUG, "total size here is %ld", total_size);
@@ -449,8 +520,17 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "pthread_mutex_unlock failed, error was %d", rc);
         perror("pthread mutex_unlock failed");
     }
-
-
+    #if(USE_AESD_CHAR_DEVICE==1)
+    if(close(recvfile_fd) == -1)
+    {   
+        syslog(LOG_ERR, "Failed to close recvfile. 2nd");
+        syslog(LOG_ERR, "error string is %s", strerror(errno));
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE CLOSED 2");
+    }
+    #endif
     free(send_my_buffer);
     send_my_buffer = NULL;
     thread_func_args->thread_info.thread_complete_success = true;
@@ -485,18 +565,18 @@ int main(int argc, char *argv[])
     else    
         daemon_en = false;
 
-
+    //#if(USE_AESD_CHAR_DEVICE == 1)
     //Receives data over the connection and appends to file "/var/tmp/aesdsocketdata", creating this file if it doesn't exist.
-    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_TRUNC,
-            S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
-    if (recvfile_fd == -1) 
-    {
-        /*error*/
-        int err = errno;
-        syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
-        closeAll(EXIT_FAILURE);
-    }
-
+    // recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    // if (recvfile_fd == -1) 
+    // {
+    //     /*error*/
+    //     int err = errno;
+    //     syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+    //     syslog(LOG_ERR, "Error: %s", strerror(errno));
+    //     closeAll(EXIT_FAILURE);
+    // }
+    //#endif
 
     memset(&hints, 0, sizeof(hints)); //empty the struct
     hints.ai_family = AF_UNSPEC;      //Allow IPv4 or IPv6
@@ -565,8 +645,9 @@ int main(int argc, char *argv[])
 
     //syslog(LOG_DEBUG, "server: waiting for connections.........\n");
 
-
+    #ifndef USE_AESD_CHAR_DEVICE
     initTimer();
+    #endif
 
     //printf("Timer thread has been set\n");
     
@@ -680,12 +761,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    #if (USE_AESD_CHAR_DEVICE==0)
     pthread_cancel(timertid);
     join_rc1 = pthread_join(timertid, NULL);
     if (join_rc1 != 0)
     {
         syslog(LOG_ERR, "Timer thread failed to join.");
     }
+    #endif
     syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
     return 0;

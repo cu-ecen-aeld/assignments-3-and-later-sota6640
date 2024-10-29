@@ -48,13 +48,10 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
         offset_curr = (offset_curr + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
         count++;
 
-        if(offset_curr == buffer->in_offs && !buffer->full){
+        if(offset_curr == buffer->in_offs){
             break;
         }
     }
-
-    
-
     return NULL;
 }
 
@@ -64,16 +61,25 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * new start location.
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+* @return NULL or, if an existing entry at out_offs was replaced, the value of buffptr for the entry which
+* was replaced (for dynamic allocation / free for Assignment 8)
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    if(buffer->full)
+    const char *retbuffptr = NULL;
+    if(buffer->full) //oldest element is about to be replaced
+    {
+        //retbuffptr = malloc(buffer->entry[buffer->out_offs].size);
+        retbuffptr = buffer->entry[buffer->out_offs].buffptr;
+        //no need to malloc here, it's done in main
+        //strcpy(retbuffptr, buffer->entry[buffer->out_offs].buffptr);
         buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
     buffer->entry[buffer->in_offs].size = add_entry->size;
     buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-    buffer->full = (buffer->out_offs == buffer->in_offs) ? true : false;
-    return;
+    buffer->full = (buffer->out_offs == buffer->in_offs);
+    return retbuffptr;
 }
 
 /**
