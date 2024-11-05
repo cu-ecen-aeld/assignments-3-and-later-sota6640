@@ -145,7 +145,7 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
     struct aesd_buffer_entry *entry = NULL;
     ssize_t circbuffsize = 0;
     uint8_t index;
-    uint8_t i=0;
+    uint8_t i;
     if (filp == NULL)
     {
         retval = -EINVAL;
@@ -193,10 +193,11 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
         goto errout;
     }
 
-    while (i < write_cmd)
+    i = dev->circular.out_offs;
+    while (i != write_cmd)
     {
         filp->f_pos += dev->circular.entry[i].size;
-        i++;
+        i = (i+1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     }
 
     filp->f_pos += write_cmd_offset;

@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <netdb.h>
@@ -42,6 +43,7 @@
 #include <errno.h>
 //#include <sys/queue.h>
 #include "queue.h"
+#include "aesd_ioctl.h"
 
 /**
  * Assignment 8 Additions
@@ -90,6 +92,7 @@ int sockfd = -1;
 int new_fd = -1;
 int recvfile_fd = -1;
 static ssize_t total_size = 0;
+const char *seek_string = "AESDCHAR_IOCSEEKTO:";
 
 pid_t pid;
 #if (USE_AESD_CHAR_DEVICE==1)
@@ -377,6 +380,13 @@ void *threadfunc(void *args)
 
         }while (isPacketValid == false);
 
+        if(strncmp(my_buffer, seek_string, sizeof(seek_string)) == 0)
+        {
+            struct aesd_seekto seekto;
+            seekto.write_cmd = write_cmd;
+            seekto.write_cmd_offset = offset;
+            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
+        }
 
 
     //new line character has been found
