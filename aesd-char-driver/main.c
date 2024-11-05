@@ -139,10 +139,48 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
  */
 static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, unsigned int write_cmd_offset)
 {
+    ssize_t retval;
+    struct aesd_dev *dev = NULL;
+    struct aesd_buffer_entry *entry = NULL;
+    uint8_t index;
+    if (filp == NULL)
+    {
+        retval = -EINVAL;
+        PDEBUG("file pointer filp NULL, returning %zu", retval);
+        return retval;
+    }
+
+    dev = filp->private_data;
+
+
+    if (mutex_lock_interruptible(&dev->bufferlock))
+    {
+        retval = -ERESTARTSYS;
+        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        return retval;
+    }    
+
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &(aesd_device.circular), index);
+    {
+        if(entry->buffptr != NULL)
+            if (write_cmd_offset > entry->size)
+                {
+                    retval = -EINVAL;
+                    PDEBUG("write_cmd_offset was out of range. %zu", retval);
+                    return retval;
+                }
+    }
+
+    filp->f_pos = 
+
+
+
+    mutex_unlock(&dev->bufferlock);
+    return 0;
 
 }
 
-int aesd_unlocked_ioctl(struct inode *node, struct file *filp, unsigned int vala, unsigned long valb)
+int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     ssize_t retval; 
     if (filp == NULL)
@@ -152,20 +190,21 @@ int aesd_unlocked_ioctl(struct inode *node, struct file *filp, unsigned int vala
         goto errout;
     }
     
-    case AESDCHAR_IOCSEEKTO
-    {
-        struct aesd_seekto seekto;
-        if (copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0) {
-            retval = EFAULT;
-        } else {
-            retval = aesd_adjust_file_offset(filp, seekto.write_cmd, seekto.write_cmd_offset);
+    switch(cmd) {
+        case AESDCHAR_IOCSEEKTO:
+        {
+            struct aesd_seekto seekto;
+            if (copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0) {
+                retval = EFAULT;
+            } else {
+                retval = aesd_adjust_file_offset(filp, seekto.write_cmd, seekto.write_cmd_offset);
+            }
+            break;
         }
-        break;
+
+        default:
+            return -ENOTTY;
     }
-
-    default:
-        break;
-
 
     errout:
     return retval;
