@@ -97,10 +97,12 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
 
     dev = filp->private_data;
 
+    PDEBUG("entered seek with offset = %lld and whence = %d", offset, whence);
+
     if (mutex_lock_interruptible(&dev->bufferlock))
     {
         retval = -ERESTARTSYS;
-        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        PDEBUG("aesd_llseek: mutex lock interruptible , returning %zu", retval);
         goto errout;
     }
 
@@ -120,7 +122,6 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
     }
     retval = fsl;
     //filp->f_pos += fsl;
-    return retval;
 
     unlockout:
     mutex_unlock(&dev->bufferlock);
@@ -142,7 +143,9 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
     ssize_t retval;
     struct aesd_dev *dev = NULL;
     struct aesd_buffer_entry *entry = NULL;
+    ssize_t circbuffsize = 0;
     uint8_t index;
+    uint8_t i=0;
     if (filp == NULL)
     {
         retval = -EINVAL;
@@ -150,37 +153,63 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
         return retval;
     }
 
+    if (write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED-1)
+    {
+        retval = -EINVAL;
+        PDEBUG("write_cmd_offset was out of range. %zu", retval);
+        return retval;
+    }
+
+
     dev = filp->private_data;
 
 
     if (mutex_lock_interruptible(&dev->bufferlock))
     {
         retval = -ERESTARTSYS;
-        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        PDEBUG("aesd_adjust_file_offset mutex lock interruptible, returning %zu", retval);
         return retval;
     }    
 
-    AESD_CIRCULAR_BUFFER_FOREACH(entry, &(aesd_device.circular), index);
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &(aesd_device.circular), index)
     {
         if(entry->buffptr != NULL)
-            if (write_cmd_offset > entry->size)
-                {
-                    retval = -EINVAL;
-                    PDEBUG("write_cmd_offset was out of range. %zu", retval);
-                    return retval;
-                }
+            circbuffsize++;
     }
 
-    filp->f_pos = 
+    PDEBUG("Total entries are %ld", circbuffsize);
+
+    if (write_cmd > circbuffsize)
+    {
+        retval = -EINVAL;
+        PDEBUG("write_cmd offset was out of range. %zu", retval);
+        goto errout;
+    }
+
+    if(write_cmd_offset > dev->circular.entry[write_cmd].size-1)
+    {
+        retval = -EINVAL;
+        PDEBUG("write_cmd_offset was out of range. %zu", retval);
+        goto errout;
+    }
+
+    while (i < write_cmd)
+    {
+        filp->f_pos += dev->circular.entry[i].size;
+        i++;
+    }
+
+    filp->f_pos += write_cmd_offset;
+    retval = 0;
 
 
-
+    errout:
     mutex_unlock(&dev->bufferlock);
-    return 0;
+    return retval;
 
 }
 
-int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+long aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     ssize_t retval; 
     if (filp == NULL)
@@ -240,7 +269,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     if (mutex_lock_interruptible(&dev->bufferlock))
     {
         retval = -ERESTARTSYS;
-        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        PDEBUG("aesd_read: mutex lock interruptible, returning %zu", retval);
         goto errout;
     }
     
@@ -322,7 +351,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     if (mutex_lock_interruptible(&dev->bufferlock))
     {
         retval = -ERESTARTSYS;
-        PDEBUG("mutex lock interruptible, returning %zu", retval);
+        PDEBUG("aesd_write: mutex lock interruptible, returning %zu", retval);
         goto free_out;
     }
     
