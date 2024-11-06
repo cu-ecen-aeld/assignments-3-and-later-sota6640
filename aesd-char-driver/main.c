@@ -186,18 +186,18 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
         goto errout;
     }
 
-    if(write_cmd_offset > dev->circular.entry[write_cmd].size-1)
+    if(write_cmd_offset >= dev->circular.entry[write_cmd].size)
     {
         retval = -EINVAL;
         PDEBUG("write_cmd_offset was out of range. %zu", retval);
         goto errout;
     }
 
-    i = dev->circular.out_offs;
-    while (i != write_cmd)
+    i = 0;
+    while (i < write_cmd)
     {
         filp->f_pos += dev->circular.entry[i].size;
-        i = (i+1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        i++;
     }
 
     filp->f_pos += write_cmd_offset;
@@ -215,7 +215,7 @@ long aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
     if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
 	if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
-    
+
     ssize_t retval; 
     if (filp == NULL)
     {
