@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <netdb.h>
@@ -42,7 +43,8 @@
 #include <errno.h>
 //#include <sys/queue.h>
 #include "queue.h"
-
+//#include "aesd_ioctl.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 /**
  * Assignment 8 Additions
  */
@@ -90,6 +92,7 @@ int sockfd = -1;
 int new_fd = -1;
 int recvfile_fd = -1;
 static ssize_t total_size = 0;
+const char *seek_string = "AESDCHAR_IOCSEEKTO:";
 
 pid_t pid;
 #if (USE_AESD_CHAR_DEVICE==1)
@@ -334,12 +337,27 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "Failed to malloc.");
         closeAll(EXIT_FAILURE);
     }
-
     memset(my_buffer, 0, BUF_SIZE);
+
+    #if (USE_AESD_CHAR_DEVICE == 1)
+    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (recvfile_fd == -1) 
+    {
+        /*error*/
+        int err = errno;
+        syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+        syslog(LOG_ERR, "Error: %s", strerror(errno));
+        closeAll(EXIT_FAILURE);
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE OPENED 1");
+    }
+    #endif
     int errnum;
     do{
             bytes_rx = recv(thread_func_args->thread_info.afd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
-            //syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
+            syslog(LOG_DEBUG, "Receiving: %s", my_buffer); 
             // syslog(LOG_DEBUG, "new_fd is %d", thread_func_args->thread_info.afd);       
             syslog(LOG_DEBUG, "I have received %ld bytes", bytes_rx);
             if (bytes_rx < 0)
@@ -350,6 +368,33 @@ void *threadfunc(void *args)
                 syslog(LOG_ERR, "Error Msg: %s", strerror(errno));
                 closeAll(EXIT_FAILURE);
             }
+
+        #if (USE_AESD_CHAR_DEVICE == 1)
+        if(strncmp(my_buffer, seek_string, strlen(seek_string)) == 0)
+        {
+            struct aesd_seekto seekto;
+            syslog(LOG_DEBUG, "Write command to seek.");
+            if(sscanf(my_buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) != 2)
+            {
+                syslog(LOG_ERR, "sscanf() fail");
+                syslog(LOG_ERR, "sscanf() call err. error string is %s", strerror(errno));
+            }
+            syslog(LOG_DEBUG, "seekto.write_cmd is %u and seekto.write_cmd_offset is %u", seekto.write_cmd, seekto.write_cmd_offset);
+            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
+            if (result_ret == 0)
+            {
+                syslog(LOG_DEBUG, "ioctl() call successful");
+            }
+            else if (result_ret == -1)
+            {
+                syslog(LOG_ERR, "ioctl() call err. error string is %s", strerror(errno));
+            }
+
+            goto skip_write;
+        }
+        #endif
+
+
             supplementBuf += bytes_rx; 
             //syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu, AFD: %d", supplementBuf, thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
             new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
@@ -377,28 +422,13 @@ void *threadfunc(void *args)
 
         }while (isPacketValid == false);
 
-
-
     //new line character has been found
     if(isPacketValid == true)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
-        #if (USE_AESD_CHAR_DEVICE == 1)
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
-        if (recvfile_fd == -1) 
-        {
-            /*error*/
-            int err = errno;
-            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
-            syslog(LOG_ERR, "Error: %s", strerror(errno));
-            closeAll(EXIT_FAILURE);
-        }
-        else
-        {
-            syslog(LOG_DEBUG, "HANDLE OPENED 1");
-        }
-        #endif
+
+
 
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
@@ -411,7 +441,7 @@ void *threadfunc(void *args)
 
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
-        total_size += supplementBuf;
+        //total_size += supplementBuf;
 
         rc = pthread_mutex_unlock(&writeSocket);
         if (rc != 0)
@@ -431,50 +461,56 @@ void *threadfunc(void *args)
         }
 
         syslog(LOG_DEBUG, "Write completed to recvfile_fd");
-
-    #if(USE_AESD_CHAR_DEVICE == 1)
-    if(close(recvfile_fd) == -1)
-    {   
-        syslog(LOG_ERR, "Failed to close recvfile.");
-        syslog(LOG_ERR, "error string is %s", strerror(errno));
-    }
-    else
-    {
-        syslog(LOG_DEBUG, "HANDLE CLOSED 1");
-    }
-    #endif
-    }
-
-
-    free(my_buffer);
-    my_buffer = NULL;
-
-
-
-    #if (USE_AESD_CHAR_DEVICE==0)
-    if(lseek(recvfile_fd, 0, SEEK_SET) == -1)
-    {
-        syslog(LOG_ERR, "server: lseek");
-        perror("server: lseek set");
-        closeAll(EXIT_FAILURE);
-    }
-    #else
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
-        if (recvfile_fd == -1) 
-        {
-            /*error*/
-            int err = errno;
-            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
-            syslog(LOG_ERR, "Error: %s", strerror(errno));
-            closeAll(EXIT_FAILURE);
+    // #if(USE_AESD_CHAR_DEVICE == 1)
+    // if(close(recvfile_fd) == -1)
+    // {   
+    //     syslog(LOG_ERR, "Failed to close recvfile.");
+    //     syslog(LOG_ERR, "error string is %s", strerror(errno));
+    // }
+    // else
+    // {
+    //     syslog(LOG_DEBUG, "HANDLE CLOSED 1");
+    // }
+    // #endif
+    
+    skip_write:
+        #if (USE_AESD_CHAR_DEVICE == 1)
+        if(close(recvfile_fd) == -1)
+        {   
+            syslog(LOG_ERR, "Failed to close recvfile.");
+            syslog(LOG_ERR, "error string is %s", strerror(errno));
         }
         else
         {
-            syslog(LOG_DEBUG, "HANDLE OPENED 2");
+            syslog(LOG_DEBUG, "HANDLE CLOSED 1");
         }
+        #endif
+
+
+    }
+
+    free(my_buffer);
+    my_buffer = NULL;
+    
+
+    #if (USE_AESD_CHAR_DEVICE == 0)
+
+    #else
+    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (recvfile_fd == -1) 
+    {
+        int err = errno;
+        syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
+        syslog(LOG_ERR, "Error: %s", strerror(errno));
+        closeAll(EXIT_FAILURE);
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE OPENED 2");
+    }
     #endif
 
-    
+
     rc = pthread_mutex_lock(&writeSocket);
     if (rc != 0)
     {
@@ -495,7 +531,9 @@ void *threadfunc(void *args)
 
 
     //printf("total size here is %ld, \n", total_size);
+    total_size = lseek(recvfile_fd, 0, SEEK_END);
     syslog(LOG_DEBUG, "total size here is %ld", total_size);
+    lseek(recvfile_fd, 0, SEEK_SET);
     while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
         syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
