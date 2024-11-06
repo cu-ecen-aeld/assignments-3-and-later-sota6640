@@ -43,8 +43,8 @@
 #include <errno.h>
 //#include <sys/queue.h>
 #include "queue.h"
-#include "aesd_ioctl.h"
-
+//#include "aesd_ioctl.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 /**
  * Assignment 8 Additions
  */
@@ -337,8 +337,23 @@ void *threadfunc(void *args)
         syslog(LOG_ERR, "Failed to malloc.");
         closeAll(EXIT_FAILURE);
     }
-
     memset(my_buffer, 0, BUF_SIZE);
+
+    #if (USE_AESD_CHAR_DEVICE == 1)
+    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (recvfile_fd == -1) 
+    {
+        /*error*/
+        int err = errno;
+        syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
+        syslog(LOG_ERR, "Error: %s", strerror(errno));
+        closeAll(EXIT_FAILURE);
+    }
+    else
+    {
+        syslog(LOG_DEBUG, "HANDLE OPENED 1");
+    }
+    #endif
     int errnum;
     do{
             bytes_rx = recv(thread_func_args->thread_info.afd, my_buffer+supplementBuf, BUF_SIZE-1, 0); 
@@ -353,6 +368,32 @@ void *threadfunc(void *args)
                 syslog(LOG_ERR, "Error Msg: %s", strerror(errno));
                 closeAll(EXIT_FAILURE);
             }
+
+        #if (USE_AESD_CHAR_DEVICE == 1)
+        if(strncmp(my_buffer, seek_string, strlen(seek_string)) == 0)
+        {
+            struct aesd_seekto seekto;
+            syslog(LOG_DEBUG, "Write command to seek.");
+            if(sscanf(my_buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) != 2)
+            {
+                syslog(LOG_ERR, "sscanf() fail");
+                syslog(LOG_ERR, "sscanf() call err. error string is %s", strerror(errno));
+            }
+            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
+            if (result_ret == 0)
+            {
+                syslog(LOG_DEBUG, "ioctl() call successful");
+            }
+            else if (result_ret == -1)
+            {
+                syslog(LOG_ERR, "ioctl() call err. error string is %s", strerror(errno));
+            }
+
+            goto skip_write;
+        }
+        #endif
+
+
             supplementBuf += bytes_rx; 
             //syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu, AFD: %d", supplementBuf, thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
             new_line = strchr(my_buffer, '\n'); //if NULL, keep getting packets
@@ -380,35 +421,13 @@ void *threadfunc(void *args)
 
         }while (isPacketValid == false);
 
-        if(strncmp(my_buffer, seek_string, sizeof(seek_string)) == 0)
-        {
-            struct aesd_seekto seekto;
-            seekto.write_cmd = write_cmd;
-            seekto.write_cmd_offset = offset;
-            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
-        }
-
-
     //new line character has been found
     if(isPacketValid == true)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
 
-        #if (USE_AESD_CHAR_DEVICE == 1)
-        recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
-        if (recvfile_fd == -1) 
-        {
-            /*error*/
-            int err = errno;
-            syslog(LOG_ERR, "%s failed to open. errno izz -> %d", recvfile, err);
-            syslog(LOG_ERR, "Error: %s", strerror(errno));
-            closeAll(EXIT_FAILURE);
-        }
-        else
-        {
-            syslog(LOG_DEBUG, "HANDLE OPENED 1");
-        }
-        #endif
+
+
 
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
@@ -455,6 +474,7 @@ void *threadfunc(void *args)
     #endif
     }
 
+skip_write:
 
     free(my_buffer);
     my_buffer = NULL;
@@ -485,6 +505,7 @@ void *threadfunc(void *args)
     #endif
 
     
+
     rc = pthread_mutex_lock(&writeSocket);
     if (rc != 0)
     {

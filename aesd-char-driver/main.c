@@ -212,6 +212,10 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
 
 long aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
+
+    if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
+	if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
+    
     ssize_t retval; 
     if (filp == NULL)
     {
