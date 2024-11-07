@@ -91,7 +91,7 @@ bool daemon_en = false;
 int sockfd = -1;
 int new_fd = -1;
 int recvfile_fd = -1;
-static ssize_t total_size = 0;
+//static ssize_t total_size = 0;
 const char *seek_string = "AESDCHAR_IOCSEEKTO:";
 
 pid_t pid;
@@ -210,7 +210,7 @@ static void initTimer(void)
 void closeAll(int exit_flag)
 {
     //int rc;
-    syslog(LOG_DEBUG, "PERFORMING CLEANUP.");
+    //syslog(LOG_DEBUG, "PERFORMING CLEANUP.");
     if(sockfd != -1) close(sockfd);
     if(new_fd != -1) close(new_fd);
     if(recvfile_fd != -1) close(recvfile_fd);
@@ -220,10 +220,10 @@ void closeAll(int exit_flag)
             syslog(LOG_ERR, "File removal not successful");
         }
     #endif
-    syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
+    //syslog(LOG_DEBUG, "PERFORMING CLEANUP1");
     //timer_delete(timerid);
     pthread_mutex_destroy(&writeSocket);
-    syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
+    //syslog(LOG_DEBUG, "PERFORMING CLEANUP2");
     syslog(LOG_DEBUG, "CLEANUP COMPLETED.");
     closelog();
     exit(exit_flag);
@@ -351,7 +351,7 @@ void *threadfunc(void *args)
     }
     else
     {
-        syslog(LOG_DEBUG, "HANDLE OPENED 1");
+        syslog(LOG_DEBUG, "Open recvfile() for recv() call");
     }
     #endif
     int errnum;
@@ -368,32 +368,6 @@ void *threadfunc(void *args)
                 syslog(LOG_ERR, "Error Msg: %s", strerror(errno));
                 closeAll(EXIT_FAILURE);
             }
-
-        #if (USE_AESD_CHAR_DEVICE == 1)
-        if(strncmp(my_buffer, seek_string, strlen(seek_string)) == 0)
-        {
-            struct aesd_seekto seekto;
-            syslog(LOG_DEBUG, "Write command to seek.");
-            if(sscanf(my_buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) != 2)
-            {
-                syslog(LOG_ERR, "sscanf() fail");
-                syslog(LOG_ERR, "sscanf() call err. error string is %s", strerror(errno));
-            }
-            syslog(LOG_DEBUG, "seekto.write_cmd is %u and seekto.write_cmd_offset is %u", seekto.write_cmd, seekto.write_cmd_offset);
-            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
-            if (result_ret == 0)
-            {
-                syslog(LOG_DEBUG, "ioctl() call successful");
-            }
-            else if (result_ret == -1)
-            {
-                syslog(LOG_ERR, "ioctl() call err. error string is %s", strerror(errno));
-            }
-
-            goto skip_write;
-        }
-        #endif
-
 
             supplementBuf += bytes_rx; 
             //syslog(LOG_DEBUG, "supplementBuf is %ld in thread ID : %lu, AFD: %d", supplementBuf, thread_func_args->thread_info.threadid, thread_func_args->thread_info.afd);
@@ -422,14 +396,35 @@ void *threadfunc(void *args)
 
         }while (isPacketValid == false);
 
+    #if (USE_AESD_CHAR_DEVICE == 1)
+        if(strncmp(my_buffer, seek_string, strlen(seek_string)) == 0)
+        {
+            struct aesd_seekto seekto;
+            syslog(LOG_DEBUG, "Write command to seek.");
+            if(sscanf(my_buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) != 2)
+            {
+                syslog(LOG_ERR, "sscanf() fail");
+                syslog(LOG_ERR, "sscanf() call err. error string is %s", strerror(errno));
+            }
+            syslog(LOG_DEBUG, "seekto.write_cmd is %u and seekto.write_cmd_offset is %u", seekto.write_cmd, seekto.write_cmd_offset);
+            int result_ret = ioctl(recvfile_fd, AESDCHAR_IOCSEEKTO, &seekto);
+            if (result_ret == 0)
+            {
+                syslog(LOG_DEBUG, "ioctl() call successful");
+            }
+            else if (result_ret == -1)
+            {
+                syslog(LOG_ERR, "ioctl() call err. error string is %s", strerror(errno));
+            }
+
+            goto skip_write;
+        }
+    #endif
+
     //new line character has been found
     if(isPacketValid == true)
     {   
         syslog(LOG_DEBUG, "PACKET SUCCESSFULLY VALIDATED");
-
-
-
-
         rc = pthread_mutex_lock(&writeSocket);
         if (rc != 0)
         {
@@ -437,7 +432,7 @@ void *threadfunc(void *args)
             perror("pthread mutex_lock failed");
         }
 
-        lseek(recvfile_fd, 0, SEEK_END);
+        //lseek(recvfile_fd, 0, SEEK_END);
 
         nr = write(recvfile_fd, my_buffer, supplementBuf);
 
@@ -450,7 +445,7 @@ void *threadfunc(void *args)
             perror("pthread mutex_unlock failed");
         }
 
-        syslog(LOG_DEBUG, "bytes written to recvfile is %ld",nr);
+        //syslog(LOG_DEBUG, "bytes written to recvfile is %ld",nr);
         if (nr != supplementBuf)
         {
             /*error*/
@@ -460,55 +455,57 @@ void *threadfunc(void *args)
             closeAll(EXIT_FAILURE);
         }
 
-        syslog(LOG_DEBUG, "Write completed to recvfile_fd");
-    // #if(USE_AESD_CHAR_DEVICE == 1)
-    // if(close(recvfile_fd) == -1)
-    // {   
-    //     syslog(LOG_ERR, "Failed to close recvfile.");
-    //     syslog(LOG_ERR, "error string is %s", strerror(errno));
-    // }
-    // else
-    // {
-    //     syslog(LOG_DEBUG, "HANDLE CLOSED 1");
-    // }
-    // #endif
+        syslog(LOG_DEBUG, "Write completed to recvfile_fd, wrote %ld bytes", nr);
+        // #if(USE_AESD_CHAR_DEVICE == 1)
+        // if(close(recvfile_fd) == -1)
+        // {   
+        //     syslog(LOG_ERR, "Failed to close recvfile.");
+        //     syslog(LOG_ERR, "error string is %s", strerror(errno));
+        // }
+        // else
+        // {
+        //     syslog(LOG_DEBUG, "HANDLE CLOSED 1");
+        // }
+        // #endif
     
-    skip_write:
-        #if (USE_AESD_CHAR_DEVICE == 1)
-        if(close(recvfile_fd) == -1)
-        {   
-            syslog(LOG_ERR, "Failed to close recvfile.");
-            syslog(LOG_ERR, "error string is %s", strerror(errno));
-        }
-        else
-        {
-            syslog(LOG_DEBUG, "HANDLE CLOSED 1");
-        }
-        #endif
+    //skip_write:
+        // #if (USE_AESD_CHAR_DEVICE == 1)
+        // if(close(recvfile_fd) == -1)
+        // {   
+        //     syslog(LOG_ERR, "Failed to close recvfile.");
+        //     syslog(LOG_ERR, "error string is %s", strerror(errno));
+        // }
+        // else
+        // {
+        //     syslog(LOG_DEBUG, "Close recvfile() after recv and write(not required for AESDSEEKTO)");
+        // }
+        // #endif
 
 
     }
+
+    skip_write:
 
     free(my_buffer);
     my_buffer = NULL;
     
 
-    #if (USE_AESD_CHAR_DEVICE == 0)
+    // #if (USE_AESD_CHAR_DEVICE == 0)
 
-    #else
-    recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (recvfile_fd == -1) 
-    {
-        int err = errno;
-        syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
-        syslog(LOG_ERR, "Error: %s", strerror(errno));
-        closeAll(EXIT_FAILURE);
-    }
-    else
-    {
-        syslog(LOG_DEBUG, "HANDLE OPENED 2");
-    }
-    #endif
+    // #else
+    // recvfile_fd = open(recvfile, O_RDWR | O_CREAT | O_APPEND, 0644);
+    // if (recvfile_fd == -1) 
+    // {
+    //     int err = errno;
+    //     syslog(LOG_ERR, "%s failed to open. errno -> %d", recvfile, err);
+    //     syslog(LOG_ERR, "Error: %s", strerror(errno));
+    //     closeAll(EXIT_FAILURE);
+    // }
+    // else
+    // {
+    //     syslog(LOG_DEBUG, "Open recvfile() for read and send");
+    // }
+    // #endif
 
 
     rc = pthread_mutex_lock(&writeSocket);
@@ -528,14 +525,9 @@ void *threadfunc(void *args)
 
     int errnum9 = 0;
 
-
-
-    //printf("total size here is %ld, \n", total_size);
-    total_size = lseek(recvfile_fd, 0, SEEK_END);
-    syslog(LOG_DEBUG, "total size here is %ld", total_size);
-    lseek(recvfile_fd, 0, SEEK_SET);
-    while ((bytes_read = read(recvfile_fd, send_my_buffer, total_size)) > 0) {
-        syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
+    while ((bytes_read = read(recvfile_fd, send_my_buffer, sizeof(send_my_buffer) - 1)) > 0)
+    {
+        //syslog(LOG_DEBUG, "bytes_read is %ld", bytes_read);
         //syslog(LOG_DEBUG, "Sending: %s",send_my_buffer);
         if (send(thread_func_args->thread_info.afd, send_my_buffer, bytes_read, 0) != bytes_read)
         {
@@ -566,13 +558,13 @@ void *threadfunc(void *args)
     }
     else
     {
-        syslog(LOG_DEBUG, "HANDLE CLOSED 2");
+        syslog(LOG_DEBUG, "Close recvfile after read and send");
     }
     #endif
     free(send_my_buffer);
     send_my_buffer = NULL;
     thread_func_args->thread_info.thread_complete_success = true;
-    syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
+    //syslog(LOG_DEBUG, "About to exit thread ID = %lu", thread_func_args->thread_info.threadid);
     syslog(LOG_DEBUG, "_________________________________________________________");
     return 0;
 }
@@ -738,7 +730,7 @@ int main(int argc, char *argv[])
 
         else 
         {
-            syslog(LOG_DEBUG, "pthread_created successfully. The threadID is %lu. AFD: %d", thread_data->thread_info.threadid, thread_data->thread_info.afd);
+            //syslog(LOG_DEBUG, "pthread_created successfully. The threadID is %lu. AFD: %d", thread_data->thread_info.threadid, thread_data->thread_info.afd);
         }
 
 
@@ -760,7 +752,7 @@ int main(int argc, char *argv[])
                     perror("Failed to pthread_join()");
                     continue;
                 }
-                syslog(LOG_DEBUG, "Joined thread %lu", datap->thread_info.threadid);
+                //syslog(LOG_DEBUG, "Joined thread %lu", datap->thread_info.threadid);
                 SLIST_REMOVE(&head, datap, slist_data_s, nextThread);
                 free(datap);
                 datap = NULL;
@@ -792,7 +784,7 @@ int main(int argc, char *argv[])
                     perror("Failed to pthread_join()");
                     continue;
                 }
-                syslog(LOG_DEBUG, "Joined thread %lu", datap1->thread_info.threadid);
+                //syslog(LOG_DEBUG, "Joined thread %lu", datap1->thread_info.threadid);
                 SLIST_REMOVE(&head, datap1, slist_data_s, nextThread);
                 free(datap1);
                 datap1 = NULL;
@@ -807,7 +799,7 @@ int main(int argc, char *argv[])
         syslog(LOG_ERR, "Timer thread failed to join.");
     }
     #endif
-    syslog(LOG_DEBUG, "Do I reach here?");
+    //syslog(LOG_DEBUG, "Do I reach here?");
     closeAll(EXIT_SUCCESS);
     return 0;
 }

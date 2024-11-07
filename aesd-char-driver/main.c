@@ -27,7 +27,6 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/fs.h> // file_operations
-
 #include "aesd_ioctl.h"
 #include "aesdchar.h"
 
@@ -140,6 +139,8 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
  */
 static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, unsigned int write_cmd_offset)
 {
+    PDEBUG("aesd_adjust_file_offset() called");
+   
     ssize_t retval;
     struct aesd_dev *dev = NULL;
     struct aesd_buffer_entry *entry = NULL;
@@ -153,7 +154,7 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
         return retval;
     }
 
-    if (write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED-1)
+    if (write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
     {
         retval = -EINVAL;
         PDEBUG("write_cmd_offset was out of range. %zu", retval);
@@ -201,6 +202,9 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
     }
 
     filp->f_pos += write_cmd_offset;
+
+    PDEBUG("f_pos at the end of aesd_adjust_file_offset() is %llu, write_cmd is %u, write_cmd_offset is %u", filp->f_pos, write_cmd, write_cmd_offset);
+
     retval = 0;
 
 
@@ -213,10 +217,13 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
 long aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
+
+    PDEBUG("aesd_unlocked_ioctl() called");
+
     if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
 	if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
 
-    ssize_t retval; 
+    ssize_t retval = 0;
     if (filp == NULL)
     {
         retval = -EINVAL;
@@ -232,6 +239,7 @@ long aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                 retval = EFAULT;
             } else {
                 retval = aesd_adjust_file_offset(filp, seekto.write_cmd, seekto.write_cmd_offset);
+                PDEBUG("retval in AESDCHAR_IOCSEEKTO is %ld", retval);
             }
             break;
         }
@@ -260,7 +268,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     size_t entry_offset_rd;
     struct aesd_dev *dev = NULL;
     struct aesd_buffer_entry *entry = NULL;
-    PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
+    //PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
     if (filp == NULL || buf == NULL)
     {
@@ -279,7 +287,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     }
     
     entry = aesd_circular_buffer_find_entry_offset_for_fpos(&(dev->circular), *f_pos, &entry_offset_rd);
-
+    //PDEBUG("*f_pos is %lld and entry_offset_rd is %ld", *f_pos, entry_offset_rd);
     if (entry == NULL)
     {
         retval = 0;
@@ -300,13 +308,12 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     //point to the next offset
     *f_pos += read_bytes;
     retval = read_bytes;
-    goto out;
-
-    errout:
-    return retval;
 
     out:
     mutex_unlock(&dev->bufferlock);
+    return retval;
+
+    errout:
     return retval;
 }
 
@@ -397,8 +404,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     retval = count;
-    goto out;
-
 
     out:
     mutex_unlock(&dev->bufferlock);
@@ -484,6 +489,9 @@ void aesd_cleanup_module(void)
         if(del_entry->buffptr)
             kfree(del_entry->buffptr);
      }
+
+     if (aesd_device.entry.buffptr != NULL)
+        kfree(aesd_device.entry.buffptr);
 
     
 
